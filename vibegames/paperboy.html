@@ -87,7 +87,7 @@
   const ROAD_WIDTH = 200;
   const SIDEWALK_WIDTH = 120;
   const PLAYER_LANE = W - ROAD_WIDTH/2;
-  const HOUSE_POSITIONS = [80, 220, 360, 500, 640]; // X positions for houses
+  const HOUSE_POSITIONS = [530, 580, 630]; // X positions for houses - nærmere fortauet
   
   // --- State ---
   const state = {
@@ -103,6 +103,7 @@
     distance: 0,
     speed: 120, // pixels per second
     lastTime: 0,
+    nextHouseId: 0,
     
     player: null,
     thrownPapers: [],
@@ -197,7 +198,7 @@
       this.x = x;
       this.y = y;
       this.type = type; // 'normal', 'target', 'delivered'
-      this.size = 60;
+      this.size = 80; // Større hus
       this.delivered = false;
     }
     
@@ -244,15 +245,21 @@
     state.thrownPapers = [];
     state.worldOffset = 0;
     state.distance = 0;
+    state.nextHouseId = 0;
     
     state.player = new Player();
     
-    // Create houses for this day
-    for (let i = 0; i < state.target; i++) {
-      const houseY = i * 120 + 100;
-      const houseX = HOUSE_POSITIONS[i % HOUSE_POSITIONS.length];
-      state.houses.push(new House(houseX, houseY, 'target'));
+    // Create initial houses
+    for (let i = 0; i < 20; i++) { // Lag mange hus fra start
+      spawnHouse(i);
     }
+  }
+
+  function spawnHouse(index) {
+    const houseY = index * 100 + 100;
+    const houseX = HOUSE_POSITIONS[index % HOUSE_POSITIONS.length];
+    const isTarget = index < state.target; // Kun de første husene er mål
+    state.houses.push(new House(houseX, houseY, isTarget ? 'target' : 'normal'));
   }
 
   function spawnCar() {
@@ -413,13 +420,22 @@
       spawnCar();
     }
     
+    // Spawn new houses as player progresses
+    while (state.houses.length > 0 && state.houses[state.houses.length - 1].y - state.worldOffset < H + 200) {
+      state.nextHouseId++;
+      spawnHouse(state.nextHouseId + 19); // spawn ahead
+    }
+    
+    // Remove houses that are far behind
+    state.houses = state.houses.filter(house => house.y - state.worldOffset > -200);
+    
     // Check paper-house collisions
     for (const paper of state.thrownPapers) {
       for (const house of state.houses) {
         if (!house.delivered && house.type === 'target') {
           const houseScreenY = house.y - state.worldOffset;
           const paperBounds = { x: paper.x - 8, y: paper.y - 8, w: 16, h: 16 };
-          const houseBounds = { x: house.x - house.size/2, y: houseScreenY - house.size/2, w: house.size + 50, h: house.size };
+          const houseBounds = { x: house.x - house.size/2, y: houseScreenY - house.size/2, w: house.size + 70, h: house.size }; // Større kollisjonsboks
           if (rectHit(paperBounds, houseBounds)) {
             house.delivered = true;
             paper.y = H + 100; // Remove paper
@@ -494,8 +510,14 @@
     for (const house of state.houses) {
       const screenY = house.y - state.worldOffset;
       if (screenY > -100 && screenY < H + 100) {
-        drawEmoji(house.delivered ? '✅' : '🏠', house.x, screenY, house.size);
-        drawEmoji('📫', house.x + 25, screenY + 20, 20);
+        let houseEmoji = '🏡'; // Vanlig hus
+        if (house.delivered) {
+          houseEmoji = '✅'; // Levert
+        } else if (house.type === 'target') {
+          houseEmoji = '🏠'; // Målhus (blått)
+        }
+        drawEmoji(houseEmoji, house.x, screenY, house.size);
+        drawEmoji('📫', house.x + 35, screenY + 25, 25); // Større postkasse
       }
     }
     

@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>📰 Paperboy Delivery</title>
+  <style>
+    :root{
+      --bg1:#1a2332; --bg2:#2d3748; --accent:#4299e1; --soft:#68d391; --danger:#f56565; --warning:#ed8936;
+    }
+    html,body{height:100%;margin:0;}
+    body{
+      display:grid; place-items:center; background: linear-gradient(135deg, var(--bg1), var(--bg2));
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, emoji;
+      color:#edf2f7;
+    }
+    .wrap{ width:min(980px, 100vw); padding:16px; }
+    .header{ display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:8px; }
+    .title{ font-weight:700; letter-spacing:0.5px; }
+    .badge{ font-size:12px; opacity:0.8; }
+    canvas{ width:100%; height:auto; border-radius:16px; background: linear-gradient(180deg, #87ceeb 0%, #98fb98 70%, #228b22 100%); box-shadow: 0 20px 60px rgba(0,0,0,.4), inset 0 0 0 1px rgba(255,255,255,.06); }
+    .hud{ display:flex; gap:8px; flex-wrap:wrap; justify-content:space-between; margin:10px 2px 16px; font-weight:600; }
+    .hud span{ padding:.25rem .5rem; border-radius:10px; background:rgba(255,255,255,.06); }
+    .btnbar{ display:none; position:fixed; bottom:12px; left:0; right:0; display:flex; justify-content:center; gap:14px; pointer-events:none; }
+    .ctrl{ pointer-events:auto; user-select:none; -webkit-user-select:none; touch-action:manipulation; min-width:78px; min-height:78px; border-radius:18px; background:rgba(255,255,255,.06); backdrop-filter: blur(8px); outline:1px solid rgba(255,255,255,.08); display:grid; place-items:center; font-size:28px; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+    .ctrl:active{ transform: translateY(2px); }
+    @media (pointer:coarse){ .btnbar{ display:flex; } }
+    .hint{ margin-top:8px; opacity:.85; font-size:14px; }
+    .kbd{ padding:2px 6px; border-radius:6px; background:rgba(255,255,255,.08); font-weight:700; }
+    .overlay{ position:absolute; inset:0; display:grid; place-items:center; pointer-events:none; }
+    .card{ pointer-events:auto; max-width:min(560px, 92vw); border-radius:16px; padding:18px 20px; background:rgba(10,14,28,.92); outline:1px solid rgba(255,255,255,.08); box-shadow: 0 30px 80px rgba(0,0,0,.5); text-align:center; }
+    .card h2{ margin:.1rem 0 .4rem; }
+    .card p{ margin:.25rem 0; opacity:.92; }
+    .card .small{ font-size:13px; opacity:.8; }
+    .card .row{ display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin-top:8px; }
+    .pill{ padding:6px 10px; border-radius:999px; background:rgba(255,255,255,.06); font-weight:700; }
+    .action{ margin-top:12px; display:inline-block; padding:10px 14px; border-radius:12px; background:linear-gradient(180deg, #4299e1, #3182ce); color:#e7f3ff; text-decoration:none; outline:1px solid rgba(255,255,255,.1); cursor:pointer; border:none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <div class="title">📰 Paperboy Delivery <span class="badge">v1.0</span></div>
+      <div class="hint">Move: <span class="kbd">←</span>/<span class="kbd">→</span> or <span class="kbd">A</span>/<span class="kbd">D</span> · Throw: <span class="kbd">Space</span> · Pause: <span class="kbd">P</span> · Restart: <span class="kbd">R</span></div>
+    </div>
+    <div class="hud">
+      <span id="score">Score: 0</span>
+      <span id="papers">Papers: 20</span>
+      <span id="delivered">Delivered: 0/10</span>
+      <span id="day">Day: 1</span>
+    </div>
+    <div style="position:relative">
+      <canvas id="game" width="900" height="600" aria-label="Game canvas" role="img"></canvas>
+      <div class="overlay" id="overlay" hidden>
+        <div class="card" id="overlayCard"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="btnbar" aria-hidden="true">
+    <button class="ctrl" id="btnLeft">⬅️</button>
+    <button class="ctrl" id="btnThrow">📰</button>
+    <button class="ctrl" id="btnRight">➡️</button>
+  </div>
+
+<script>
+(() => {
+  // --- Utility: HiDPI canvas scaling ---
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  function resizeCanvas() {
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const logicalW = 900, logicalH = 600;
+    const styleW = Math.min(document.querySelector('.wrap').clientWidth, 980) - 32;
+    const scale = styleW / logicalW;
+    canvas.style.width = logicalW * scale + 'px';
+    canvas.style.height = logicalH * scale + 'px';
+    canvas.width = Math.floor(logicalW * dpr);
+    canvas.height = Math.floor(logicalH * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resizeCanvas, { passive:true });
+  resizeCanvas();
+
+  // --- Game constants ---
+  const W = 900, H = 600;
+  const ROAD_WIDTH = 200;
+  const SIDEWALK_WIDTH = 120;
+  const PLAYER_LANE = W - ROAD_WIDTH/2;
+  const HOUSE_POSITIONS = [80, 220, 360, 500, 640]; // X positions for houses
+  
+  // --- State ---
+  const state = {
+    started: false,
+    running: true,
+    paused: false,
+    over: false,
+    score: 0,
+    papers: 20,
+    delivered: 0,
+    target: 10,
+    day: 1,
+    distance: 0,
+    speed: 120, // pixels per second
+    lastTime: 0,
+    
+    player: null,
+    thrownPapers: [],
+    houses: [],
+    obstacles: [],
+    cars: [],
+    
+    worldOffset: 0 // for scrolling effect
+  };
+
+  // --- Input ---
+  const input = { left: false, right: false, throw: false };
+  window.addEventListener('keydown', (e) => {
+    if (e.repeat) return;
+    switch (e.code) {
+      case 'ArrowLeft': case 'KeyA': input.left = true; break;
+      case 'ArrowRight': case 'KeyD': input.right = true; break;
+      case 'Space': input.throw = true; break;
+      case 'KeyP': togglePause(); break;
+      case 'KeyR': restart(); break;
+    }
+  });
+  window.addEventListener('keyup', (e) => {
+    switch (e.code) {
+      case 'ArrowLeft': case 'KeyA': input.left = false; break;
+      case 'ArrowRight': case 'KeyD': input.right = false; break;
+      case 'Space': input.throw = false; break;
+    }
+  });
+
+  // Touch controls
+  const btnLeft = document.getElementById('btnLeft');
+  const btnRight = document.getElementById('btnRight');
+  const btnThrow = document.getElementById('btnThrow');
+  function bindHold(btn, on, off){
+    let hold=false; const down=()=>{hold=true; on();}; const up=()=>{hold=false; off();};
+    btn.addEventListener('pointerdown', down); btn.addEventListener('pointerup', up);
+    btn.addEventListener('pointercancel', up); btn.addEventListener('pointerleave', up);
+  }
+  bindHold(btnLeft, ()=>input.left=true, ()=>input.left=false);
+  bindHold(btnRight, ()=>input.right=true, ()=>input.right=false);
+  bindHold(btnThrow, ()=>input.throw=true, ()=>input.throw=false);
+
+  // --- Entities ---
+  class Player {
+    constructor() {
+      this.x = PLAYER_LANE;
+      this.y = H - 80;
+      this.speed = 200;
+      this.size = 32;
+      this.throwCooldown = 0;
+      this.emoji = '🚴';
+    }
+    
+    update(dt) {
+      // Move left/right
+      if (input.left) this.x -= this.speed * dt;
+      if (input.right) this.x += this.speed * dt;
+      
+      // Keep player on road and sidewalk
+      this.x = Math.max(W - ROAD_WIDTH - SIDEWALK_WIDTH + 20, Math.min(W - 20, this.x));
+      
+      this.throwCooldown = Math.max(0, this.throwCooldown - dt);
+      
+      // Throw paper
+      if (input.throw && this.throwCooldown <= 0 && state.papers > 0) {
+        state.thrownPapers.push({
+          x: this.x - 30,
+          y: this.y,
+          vx: -180,
+          vy: -120,
+          gravity: 300,
+          size: 16,
+          emoji: '📰'
+        });
+        state.papers--;
+        this.throwCooldown = 0.3;
+      }
+    }
+    
+    draw() {
+      drawEmoji(this.emoji, this.x, this.y, this.size);
+    }
+    
+    getBounds() {
+      return { x: this.x - this.size/2, y: this.y - this.size/2, w: this.size, h: this.size };
+    }
+  }
+
+  class House {
+    constructor(x, y, type = 'normal') {
+      this.x = x;
+      this.y = y;
+      this.type = type; // 'normal', 'target', 'delivered'
+      this.size = 60;
+      this.delivered = false;
+    }
+    
+    draw() {
+      const emoji = this.delivered ? '✅' : (this.type === 'target' ? '🏠' : '🏡');
+      drawEmoji(emoji, this.x, this.y, this.size);
+      
+      // Draw mailbox
+      drawEmoji('📫', this.x + 25, this.y + 20, 20);
+    }
+    
+    getBounds() {
+      return { x: this.x - this.size/2, y: this.y - this.size/2, w: this.size + 50, h: this.size };
+    }
+  }
+
+  class Car {
+    constructor(x, y, speed) {
+      this.x = x;
+      this.y = y;
+      this.speed = speed;
+      this.size = 40;
+      this.emoji = Math.random() > 0.5 ? '🚗' : '🚙';
+    }
+    
+    update(dt) {
+      this.y += this.speed * dt;
+    }
+    
+    draw() {
+      drawEmoji(this.emoji, this.x, this.y, this.size);
+    }
+    
+    getBounds() {
+      return { x: this.x - this.size/2, y: this.y - this.size/2, w: this.size, h: this.size };
+    }
+  }
+
+  // --- Game setup ---
+  function initGame() {
+    state.houses = [];
+    state.obstacles = [];
+    state.cars = [];
+    state.thrownPapers = [];
+    state.worldOffset = 0;
+    state.distance = 0;
+    
+    state.player = new Player();
+    
+    // Create houses for this day
+    for (let i = 0; i < state.target; i++) {
+      const houseY = -i * 120 - 100;
+      const houseX = HOUSE_POSITIONS[i % HOUSE_POSITIONS.length];
+      state.houses.push(new House(houseX, houseY, 'target'));
+    }
+  }
+
+  function spawnCar() {
+    const lanes = [W - ROAD_WIDTH + 40, W - ROAD_WIDTH + 120];
+    const lane = lanes[Math.floor(Math.random() * lanes.length)];
+    const speed = 150 + Math.random() * 100;
+    state.cars.push(new Car(lane, -50, speed));
+  }
+
+  // --- Drawing helpers ---
+  function drawEmoji(char, x, y, size) {
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `bold ${size}px "Apple Color Emoji", "Segoe UI Emoji", emoji`;
+    ctx.fillText(char, x, y + 2);
+    ctx.restore();
+  }
+
+  function drawRect(x, y, w, h, color = '#e6f0ff', alpha = 0.9) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, w, h);
+    ctx.restore();
+  }
+
+  // --- Overlay ---
+  const overlay = document.getElementById('overlay');
+  const overlayCard = document.getElementById('overlayCard');
+  function hideOverlay() { overlay.hidden = true; overlay.style.display = 'none'; overlayCard.innerHTML = ''; }
+  function showOverlay(kind) {
+    overlay.style.display = 'grid';
+    overlay.hidden = false;
+    overlayCard.innerHTML = '';
+    const make = (html) => { const d = document.createElement('div'); d.innerHTML = html.trim(); return d.firstElementChild; };
+    
+    if (kind === 'start') {
+      overlayCard.append(
+        make(`<h2>📰 Paperboy Delivery</h2>`),
+        make(`<p>Deliver newspapers to all the houses! Avoid cars and obstacles.</p>`),
+        make(`<div class="row"><span class="pill">🏠 Target House</span><span class="pill">🚗 Avoid Cars</span></div>`),
+        make(`<p class="small">Controls: ←/→ or A/D to steer · Space to throw papers · P Pause · R Restart</p>`),
+        make(`<button class="action" id="btnStart">Start Delivery</button>`)
+      );
+      overlayCard.querySelector('#btnStart').addEventListener('click', startGame);
+    }
+    
+    if (kind === 'pause') {
+      overlayCard.append(
+        make(`<h2>⏸ Paused</h2>`),
+        make(`<p>Press <b>P</b> to resume delivery.</p>`)
+      );
+    }
+    
+    if (kind === 'gameover') {
+      overlayCard.append(
+        make(`<h2>💥 Delivery Failed</h2>`),
+        make(`<p>Final score: <b>${state.score}</b> · Delivered: <b>${state.delivered}/${state.target}</b></p>`),
+        make(`<button class="action" id="btnRestart">Try Again</button>`)
+      );
+      overlayCard.querySelector('#btnRestart').addEventListener('click', () => { hideOverlay(); restart(); });
+    }
+    
+    if (kind === 'dayComplete') {
+      overlayCard.append(
+        make(`<h2>✅ Day ${state.day} Complete!</h2>`),
+        make(`<p>Great job! Delivered ${state.delivered}/${state.target} papers.</p>`),
+        make(`<p>Score bonus: <b>+${state.target * 50}</b></p>`),
+        make(`<button class="action" id="btnNextDay">Next Day</button>`)
+      );
+      overlayCard.querySelector('#btnNextDay').addEventListener('click', nextDay);
+    }
+  }
+
+  function startGame() { state.started = true; hideOverlay(); resume(); }
+  function togglePause() { 
+    if (state.over || !state.started) return; 
+    state.paused = !state.paused; 
+    if (state.paused) { showOverlay('pause'); } else { hideOverlay(); } 
+  }
+  function resume() { state.paused = false; state.lastTime = performance.now(); requestAnimationFrame(loop); }
+
+  function restart() {
+    state.score = 0;
+    state.papers = 20;
+    state.delivered = 0;
+    state.target = 10;
+    state.day = 1;
+    state.over = false;
+    state.paused = false;
+    initGame();
+    updateHUD();
+    state.lastTime = performance.now();
+    requestAnimationFrame(loop);
+  }
+
+  function nextDay() {
+    state.day++;
+    state.delivered = 0;
+    state.papers = 20 + state.day * 2;
+    state.target = Math.min(15, 10 + state.day);
+    state.speed += 10;
+    hideOverlay();
+    initGame();
+    updateHUD();
+    resume();
+  }
+
+  function updateHUD() {
+    document.getElementById('score').textContent = `Score: ${state.score}`;
+    document.getElementById('papers').textContent = `Papers: ${state.papers}`;
+    document.getElementById('delivered').textContent = `Delivered: ${state.delivered}/${state.target}`;
+    document.getElementById('day').textContent = `Day: ${state.day}`;
+  }
+
+  // --- Game loop ---
+  function loop(t) {
+    if (state.paused || state.over) return;
+    const dt = Math.min(0.033, (t - state.lastTime) / 1000 || 0);
+    state.lastTime = t;
+
+    update(dt);
+    render();
+
+    requestAnimationFrame(loop);
+  }
+
+  function update(dt) {
+    state.player.update(dt);
+    
+    // Move world (scrolling effect)
+    state.worldOffset += state.speed * dt;
+    state.distance += state.speed * dt;
+    
+    // Update thrown papers
+    for (const paper of state.thrownPapers) {
+      paper.x += paper.vx * dt;
+      paper.y += paper.vy * dt;
+      paper.vy += paper.gravity * dt;
+    }
+    
+    // Remove papers that hit ground or go off screen
+    state.thrownPapers = state.thrownPapers.filter(paper => 
+      paper.y < H && paper.x > -50 && paper.x < W + 50
+    );
+    
+    // Update cars
+    for (const car of state.cars) {
+      car.update(dt);
+    }
+    
+    // Remove cars that are off screen
+    state.cars = state.cars.filter(car => car.y < H + 100);
+    
+    // Spawn new cars occasionally
+    if (Math.random() < 0.005) {
+      spawnCar();
+    }
+    
+    // Check paper-house collisions
+    for (const paper of state.thrownPapers) {
+      for (const house of state.houses) {
+        if (!house.delivered && house.type === 'target') {
+          const paperBounds = { x: paper.x - 8, y: paper.y - 8, w: 16, h: 16 };
+          if (rectHit(paperBounds, house.getBounds())) {
+            house.delivered = true;
+            paper.y = H + 100; // Remove paper
+            state.delivered++;
+            state.score += 100;
+            
+            if (state.delivered >= state.target) {
+              // Day complete
+              state.score += state.target * 50;
+              state.paused = true;
+              showOverlay('dayComplete');
+              return;
+            }
+          }
+        }
+      }
+    }
+    
+    // Check car-player collisions
+    const playerBounds = state.player.getBounds();
+    for (const car of state.cars) {
+      if (rectHit(playerBounds, car.getBounds())) {
+        gameOver();
+        return;
+      }
+    }
+    
+    updateHUD();
+  }
+
+  function rectHit(a, b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  }
+
+  function gameOver() {
+    state.over = true;
+    state.paused = true;
+    showOverlay('gameover');
+  }
+
+  function render() {
+    // Clear canvas
+    ctx.clearRect(0, 0, W, H);
+    
+    // Draw background (sky, grass, road, sidewalk)
+    // Sky
+    const gradient = ctx.createLinearGradient(0, 0, 0, H);
+    gradient.addColorStop(0, '#87ceeb');
+    gradient.addColorStop(0.7, '#98fb98');
+    gradient.addColorStop(1, '#228b22');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, W, H);
+    
+    // Road
+    ctx.fillStyle = '#404040';
+    ctx.fillRect(W - ROAD_WIDTH, 0, ROAD_WIDTH, H);
+    
+    // Road lines
+    ctx.fillStyle = '#ffff00';
+    const lineOffset = state.worldOffset % 60;
+    for (let y = -lineOffset; y < H; y += 60) {
+      ctx.fillRect(W - ROAD_WIDTH/2 - 2, y, 4, 30);
+    }
+    
+    // Sidewalk
+    ctx.fillStyle = '#cccccc';
+    ctx.fillRect(W - ROAD_WIDTH - SIDEWALK_WIDTH, 0, SIDEWALK_WIDTH, H);
+    
+    ctx.save();
+    ctx.translate(0, state.worldOffset % 200);
+    
+    // Draw houses (with world offset)
+    for (const house of state.houses) {
+      const screenY = house.y + state.worldOffset;
+      if (screenY > -100 && screenY < H + 100) {
+        ctx.save();
+        ctx.translate(0, -state.worldOffset);
+        house.draw();
+        ctx.restore();
+      }
+    }
+    
+    ctx.restore();
+    
+    // Draw cars
+    for (const car of state.cars) {
+      car.draw();
+    }
+    
+    // Draw thrown papers
+    for (const paper of state.thrownPapers) {
+      drawEmoji(paper.emoji, paper.x, paper.y, paper.size);
+    }
+    
+    // Draw player
+    state.player.draw();
+    
+    // Draw trees and decorations on grass
+    const treeOffset = state.worldOffset % 150;
+    for (let y = -treeOffset; y < H; y += 150) {
+      drawEmoji('🌳', 50, y, 30);
+      drawEmoji('🌸', 150, y + 75, 20);
+    }
+  }
+
+  // Boot
+  restart();
+  state.paused = true;
+  showOverlay('start');
+})();
+</script>
+</body>
+</html>

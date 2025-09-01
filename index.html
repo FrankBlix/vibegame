@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Emoji Space Invaders</title>
+  <style>
+    :root{
+      --bg1:#0b1020; --bg2:#151c35; --accent:#78e8f9; --soft:#c3ff85; --danger:#ff7b7b;
+    }
+    html,body{height:100%;margin:0;}
+    body{
+      display:grid; place-items:center; background: radial-gradient(1000px 600px at 50% 20%, var(--bg2), var(--bg1));
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, emoji;
+      color:#eef2ff;
+    }
+    .wrap{ width:min(980px, 100vw); padding:16px; }
+    .header{ display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:8px; }
+    .title{ font-weight:700; letter-spacing:0.5px; }
+    .badge{ font-size:12px; opacity:0.8; }
+    canvas{ width:100%; height:auto; border-radius:16px; background: linear-gradient(180deg, rgba(8,14,32,.8), rgba(8,14,32,.95)); box-shadow: 0 20px 60px rgba(0,0,0,.4), inset 0 0 0 1px rgba(255,255,255,.06); }
+    .hud{ display:flex; gap:8px; flex-wrap:wrap; justify-content:space-between; margin:10px 2px 16px; font-weight:600; }
+    .hud span{ padding:.25rem .5rem; border-radius:10px; background:rgba(255,255,255,.06); }
+    .btnbar{ display:none; position:fixed; bottom:12px; left:0; right:0; display:flex; justify-content:center; gap:14px; pointer-events:none; }
+    .ctrl{ pointer-events:auto; user-select:none; -webkit-user-select:none; touch-action:manipulation; min-width:78px; min-height:78px; border-radius:18px; background:rgba(255,255,255,.06); backdrop-filter: blur(8px); outline:1px solid rgba(255,255,255,.08); display:grid; place-items:center; font-size:28px; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+    .ctrl:active{ transform: translateY(2px); }
+    @media (pointer:coarse){ .btnbar{ display:flex; } }
+    .hint{ margin-top:8px; opacity:.85; font-size:14px; }
+    .kbd{ padding:2px 6px; border-radius:6px; background:rgba(255,255,255,.08); font-weight:700; }
+    .overlay{ position:absolute; inset:0; display:grid; place-items:center; pointer-events:none; }
+    .card{ pointer-events:auto; max-width:min(560px, 92vw); border-radius:16px; padding:18px 20px; background:rgba(10,14,28,.92); outline:1px solid rgba(255,255,255,.08); box-shadow: 0 30px 80px rgba(0,0,0,.5); text-align:center; }
+    .card h2{ margin:.1rem 0 .4rem; }
+    .card p{ margin:.25rem 0; opacity:.92; }
+    .card .small{ font-size:13px; opacity:.8; }
+    .card .row{ display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin-top:8px; }
+    .pill{ padding:6px 10px; border-radius:999px; background:rgba(255,255,255,.06); font-weight:700; }
+    .action{ margin-top:12px; display:inline-block; padding:10px 14px; border-radius:12px; background:linear-gradient(180deg, #1f2b5a, #162349); color:#e7f3ff; text-decoration:none; outline:1px solid rgba(255,255,255,.1); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <div class="title">🚀 Emoji Space Invaders <span class="badge">v1.1</span></div>
+      <div class="hint">Move: <span class="kbd">←</span>/<span class="kbd">→</span> or <span class="kbd">A</span>/<span class="kbd">D</span> · Fire: <span class="kbd">Space</span> · Pause: <span class="kbd">P</span> · Restart: <span class="kbd">R</span></div>
+    </div>
+    <div class="hud">
+      <span id="score">Score: 0</span>
+      <span id="level">Level: 1</span>
+      <span id="lives">Lives: 3</span>
+      <span id="pow">Power-ups: none</span>
+    </div>
+    <div style="position:relative">
+      <canvas id="game" width="900" height="700" aria-label="Game canvas" role="img"></canvas>
+      <div class="overlay" id="overlay" hidden>
+        <div class="card" id="overlayCard"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="btnbar" aria-hidden="true">
+    <button class="ctrl" id="btnLeft">⬅️</button>
+    <button class="ctrl" id="btnFire">🔥</button>
+    <button class="ctrl" id="btnRight">➡️</button>
+  </div>
+
+<script>
+(() => {
+  // --- Utility: HiDPI canvas scaling ---
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  function resizeCanvas() {
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const logicalW = 900, logicalH = 700;
+    const styleW = Math.min(document.querySelector('.wrap').clientWidth, 980) - 32;
+    const scale = styleW / logicalW;
+    canvas.style.width = logicalW * scale + 'px';
+    canvas.style.height = logicalH * scale + 'px';
+    canvas.width = Math.floor(logicalW * dpr);
+    canvas.height = Math.floor(logicalH * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // logical pixels
+  }
+  window.addEventListener('resize', resizeCanvas, { passive:true });
+  resizeCanvas();
+
+  // --- Game constants ---
+  const W = 900, H = 700;
+  const GROUND_Y = H - 80;
+  const PLAYER_EMOJI = '🚀';
+  const ENEMY_ROWS = 5;
+  const ENEMY_COLS = 11;
+  const ENEMY_EMOJI_ROWS = ['👾','👽','🤖','🧟','💀'];
+  const ENEMY_CELL_W = 60, ENEMY_CELL_H = 56;
+  const ENEMY_START_X = 80, ENEMY_START_Y = 80;
+  const ENEMY_MOVE_AREA = { left: 40, right: W - 40 };
+
+  // --- State ---
+  const state = {
+    started:false,
+    running: true,
+    paused: false,
+    over: false,
+    score: 0,
+    level: 1,
+    lives: 3,
+    lastTime: 0,
+    enemyDir: 1, // 1 = right, -1 = left
+    enemySpeed: 28, // pixels per second (base, scaled by level & remaining)
+    enemyStepDown: 22,
+    enemyTimer: 0,
+    enemyShootCooldown: 0,
+    player: null,
+    bullets: [],
+    enemyBullets: [],
+    enemies: [],
+    powerups: [], // falling pickups
+    effects: { rapid:0, trishot:0, shield:0 }
+  };
+
+  // --- Input ---
+  const input = { left:false, right:false, fire:false };
+  window.addEventListener('keydown', (e) => {
+    if (e.repeat) return;
+    switch (e.code) {
+      case 'ArrowLeft': case 'KeyA': input.left = true; break;
+      case 'ArrowRight': case 'KeyD': input.right = true; break;
+      case 'Space': input.fire = true; break;
+      case 'KeyP': togglePause(); break;
+      case 'KeyR': restart(); break;
+    }
+  });
+  window.addEventListener('keyup', (e) => {
+    switch (e.code) {
+      case 'ArrowLeft': case 'KeyA': input.left = false; break;
+      case 'ArrowRight': case 'KeyD': input.right = false; break;
+      case 'Space': input.fire = false; break;
+    }
+  });
+
+  // Touch controls
+  const btnLeft = document.getElementById('btnLeft');
+  const btnRight = document.getElementById('btnRight');
+  const btnFire = document.getElementById('btnFire');
+  function bindHold(btn, on, off){
+    let hold=false; const down=()=>{hold=true; on();}; const up=()=>{hold=false; off();};
+    btn.addEventListener('pointerdown', down); btn.addEventListener('pointerup', up);
+    btn.addEventListener('pointercancel', up); btn.addEventListener('pointerleave', up);
+  }
+  bindHold(btnLeft, ()=>input.left=true, ()=>input.left=false);
+  bindHold(btnRight, ()=>input.right=true, ()=>input.right=false);
+  bindHold(btnFire, ()=>input.fire=true, ()=>input.fire=false);
+
+  // --- Entities ---
+  class Player {
+    constructor(){
+      this.x = W/2; this.y = GROUND_Y; this.speed = 360; this.cooldown=0; this.size=36;
+    }
+    update(dt){
+      if (input.left) this.x -= this.speed * dt;
+      if (input.right) this.x += this.speed * dt;
+      this.x = Math.max(30, Math.min(W-30, this.x));
+      this.cooldown = Math.max(0, this.cooldown - dt);
+      const cd = state.effects.rapid>0 ? 0.10 : 0.22;
+      if (input.fire && this.cooldown<=0){
+        if (state.effects.trishot>0){
+          fireBullet(this.x-10, this.y-28, -520, true, -120);
+          fireBullet(this.x,     this.y-32, -520, true, 0);
+          fireBullet(this.x+10,  this.y-28, -520, true, 120);
+        } else {
+          fireBullet(this.x, this.y-28, -520, true, 0);
+        }
+        this.cooldown = cd; // seconds
+      }
+    }
+    draw(){ drawEmoji(PLAYER_EMOJI, this.x, this.y, 36); }
+    getBounds(){ return {x:this.x-18, y:this.y-24, w:36, h:36}; }
+  }
+
+  function fireBullet(x, y, vy, friendly, vx=0){ state.bullets.push({x,y,vy,vx,friendly,w:4,h:10}); }
+  function fireEnemyBullet(x, y){ state.enemyBullets.push({x,y,vy:220,w:4,h:10}); }
+
+  function initEnemies(){
+    state.enemies = [];
+    const offsetX = ENEMY_START_X, offsetY = ENEMY_START_Y;
+    for (let r=0; r<ENEMY_ROWS; r++){
+      for (let c=0; c<ENEMY_COLS; c++){
+        state.enemies.push({
+          alive:true,
+          row:r, col:c,
+          x: offsetX + c * ENEMY_CELL_W,
+          y: offsetY + r * ENEMY_CELL_H,
+          size: 34,
+          emoji: ENEMY_EMOJI_ROWS[r % ENEMY_EMOJI_ROWS.length]
+        });
+      }
+    }
+    state.enemyDir = 1;
+    state.enemySpeed = Math.min(60 + (state.level-1)*12, 180);
+    state.enemyTimer = 0;
+    state.enemyShootCooldown = 0;
+  }
+
+  function remainingEnemies(){ return state.enemies.filter(e=>e.alive).length; }
+
+  // --- Power-ups ---
+  const PU = {
+    rapid: { emoji:'⚡', duration:12 },
+    trishot: { emoji:'🔱', duration:10 },
+    shield: { emoji:'🛡️' },
+    life: { emoji:'❤️' }
+  };
+  function spawnPowerup(x,y){
+    // Weighted choice
+    const r = Math.random();
+    let type = r<0.35? 'rapid' : r<0.60? 'trishot' : r<0.85? 'shield' : 'life';
+    state.powerups.push({ x, y, vy: 110 + state.level*8, type, size: 28, alive:true });
+  }
+
+  // --- Drawing helpers ---
+  function drawEmoji(char, x, y, size){
+    ctx.save();
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.font = `bold ${size}px "Apple Color Emoji", "Segoe UI Emoji", emoji`;
+    ctx.fillText(char, x, y+2);
+    ctx.restore();
+  }
+  function drawRect(x,y,w,h,alpha=.9){ ctx.save(); ctx.globalAlpha=alpha; ctx.fillStyle='#e6f0ff'; ctx.fillRect(x,y,w,h); ctx.restore(); }
+
+  // --- Overlay ---
+  const overlay = document.getElementById('overlay');
+  const overlayCard = document.getElementById('overlayCard');
+  function hideOverlay(){ overlay.hidden = true; overlay.style.display='none'; overlayCard.innerHTML=''; }
+  function showOverlay(kind){
+    overlay.style.display='grid';
+    overlay.hidden = false; overlayCard.innerHTML = '';
+    const make = (html)=>{ const d=document.createElement('div'); d.innerHTML=html.trim(); return d.firstElementChild; };
+    if (kind==='start'){
+      overlayCard.append(
+        make(`<h2>🚀 Emoji Space Invaders</h2>`),
+        make(`<p>Defend the sector! Clear all waves to push the invaders back.</p>`),
+        make(`<div class="row"><span class="pill">👾 👽 🤖 🧟 💀</span><span class="pill">Drops: ⚡🔱🛡️❤️</span></div>`),
+        make(`<p class="small">Controls: ←/→ or A/D · Space to Fire · P Pause · R Restart</p>`),
+        make(`<a class="action" href="#" id="btnStart">Start</a>`)
+      );
+      overlayCard.querySelector('#btnStart').addEventListener('click', (e)=>{ e.preventDefault(); startGame(); });
+    }
+    if (kind==='pause'){
+      overlayCard.append(
+        make(`<h2>⏸ Paused</h2>`),
+        make(`<p>Press <b>P</b> to resume.</p>`),
+      );
+    }
+    if (kind==='gameover'){
+      overlayCard.append(
+        make(`<h2>💥 Game Over</h2>`),
+        make(`<p>Your score: <b>${state.score}</b> · Level reached: <b>${state.level}</b></p>`),
+        make(`<a class="action" href="#" id="btnRestart">Restart</a>`)
+      );
+      overlayCard.querySelector('#btnRestart').addEventListener('click', (e)=>{ e.preventDefault(); hideOverlay(); restart(); });
+    }
+    if (kind==='levelup'){
+      overlayCard.append(
+        make(`<h2>✨ Level ${state.level}</h2>`),
+        make(`<p>Speed and enemy fire rate increase. Brace yourself!</p>`),
+        make(`<a class="action" href="#" id="btnNext">Continue</a>`)
+      );
+      overlayCard.querySelector('#btnNext').addEventListener('click', (e)=>{ e.preventDefault(); hideOverlay(); resume(); });
+    }
+  }
+
+  function startGame(){ state.started=true; hideOverlay(); resume(); }
+  function togglePause(){ if (state.over || !state.started) return; state.paused = !state.paused; if (state.paused){ showOverlay('pause'); } else { hideOverlay(); } }
+  function resume(){ state.paused=false; state.lastTime = performance.now(); requestAnimationFrame(loop); }
+
+  // --- Game setup ---
+  function restart(){
+    state.score=0; state.level=1; state.lives=3; state.over=false; state.paused=false;
+    state.effects = { rapid:0, trishot:0, shield:0 };
+    state.player=new Player(); state.bullets.length=0; state.enemyBullets.length=0; state.powerups.length=0; initEnemies();
+    updateHUD();
+    state.lastTime = performance.now(); requestAnimationFrame(loop);
+  }
+
+  function nextLevel(){
+    state.level++; updateHUD();
+    initEnemies();
+    state.bullets.length=0; state.enemyBullets.length=0; state.powerups.length=0;
+    state.paused = true; showOverlay('levelup');
+  }
+
+  function updateHUD(){
+    document.getElementById('score').textContent = `Score: ${state.score}`;
+    document.getElementById('level').textContent = `Level: ${state.level}`;
+    document.getElementById('lives').textContent = `Lives: ${state.lives}`;
+    const icons = [];
+    if (state.effects.rapid>0) icons.push('⚡');
+    if (state.effects.trishot>0) icons.push('🔱');
+    if (state.effects.shield>0) icons.push('🛡️×'+state.effects.shield);
+    document.getElementById('pow').textContent = `Power-ups: ${icons.length? icons.join(' '): 'none'}`;
+  }
+
+  // --- Loop ---
+  function loop(t){
+    if (state.paused || state.over) return; // will resume later
+    const dt = Math.min(0.033, (t - state.lastTime)/1000 || 0); // clamp
+    state.lastTime = t;
+
+    update(dt);
+    render();
+
+    requestAnimationFrame(loop);
+  }
+
+  function update(dt){
+    state.player.update(dt);
+
+    // Timed effects countdown
+    if (state.effects.rapid>0) state.effects.rapid = Math.max(0, state.effects.rapid - dt);
+    if (state.effects.trishot>0) state.effects.trishot = Math.max(0, state.effects.trishot - dt);
+
+    // Bullets
+    for (const b of state.bullets){ b.y += b.vy * dt; if (b.vx) b.x += b.vx * dt; }
+    for (const b of state.enemyBullets){ b.y += b.vy * dt; }
+    state.bullets = state.bullets.filter(b=> b.y>-40 && b.y<H+40 && b.x>-20 && b.x<W+20);
+    state.enemyBullets = state.enemyBullets.filter(b=> b.y>-40 && b.y<H+40);
+
+    // Enemy movement
+    const alive = state.enemies.filter(e=>e.alive);
+    if (alive.length===0){ nextLevel(); return; }
+    const leftMost = Math.min(...alive.map(e=>e.x));
+    const rightMost = Math.max(...alive.map(e=>e.x));
+    const currentSpeed = state.enemySpeed + ( (ENEMY_ROWS*ENEMY_COLS - alive.length) * 1.2 ) + (state.level-1)*6;
+
+    const dx = state.enemyDir * currentSpeed * dt;
+    for (const e of alive) e.x += dx;
+
+    if (rightMost + 22 >= ENEMY_MOVE_AREA.right && state.enemyDir>0){
+      for (const e of alive) e.y += state.enemyStepDown;
+      state.enemyDir = -1;
+    }
+    if (leftMost - 22 <= ENEMY_MOVE_AREA.left && state.enemyDir<0){
+      for (const e of alive) e.y += state.enemyStepDown;
+      state.enemyDir = 1;
+    }
+
+    // Enemy shooting
+    state.enemyShootCooldown -= dt;
+    const fireChance = Math.min(0.25, 0.05 + state.level*0.02 + ( (ENEMY_ROWS*ENEMY_COLS - alive.length) * 0.0015 ) );
+    if (state.enemyShootCooldown<=0 && Math.random()<fireChance){
+      const byCol = new Map();
+      for (const e of alive){ const key = e.col; const prev = byCol.get(key); if (!prev || e.y>prev.y) byCol.set(key, e); }
+      const shooters = [...byCol.values()];
+      const shooter = shooters[Math.floor(Math.random()*shooters.length)];
+      if (shooter) fireEnemyBullet(shooter.x, shooter.y+18);
+      state.enemyShootCooldown = Math.max(0.4, 1.2 - state.level*0.1);
+    }
+
+    // Collisions: player bullets vs enemies (and powerup drops)
+    for (const b of state.bullets){
+      if (!b.friendly) continue;
+      for (const e of alive){
+        if (!e.alive) continue;
+        if (rectHit(b.x-2,b.y-5,4,10, e.x-20, e.y-20, 40,40)){
+          e.alive=false; b.y=-9999; state.score += 10 + (ENEMY_ROWS-e.row)*2;
+          const dropChance = Math.min(0.18 + state.level*0.02, 0.35);
+          if (Math.random() < dropChance) spawnPowerup(e.x, e.y);
+        }
+      }
+    }
+
+    // Enemy bullets vs player
+    const pb = state.player.getBounds();
+    for (const eb of state.enemyBullets){ if (rectHit(eb.x-2, eb.y-5, 4,10, pb.x,pb.y,pb.w,pb.h)){ eb.y=9999; hitPlayer(); return; } }
+
+    // Enemies reach ground or collide with player
+    for (const e of alive){
+      if (e.y+20 >= GROUND_Y-10) { gameOver(); return; }
+      if (rectHit(e.x-18,e.y-18,36,36, pb.x,pb.y,pb.w,pb.h)){ gameOver(); return; }
+    }
+
+    // Power-ups fall & collect
+    for (const p of state.powerups){ p.y += p.vy * dt; }
+    for (const p of state.powerups){
+      if (!p.alive) continue;
+      if (rectHit(p.x-16,p.y-16,32,32, pb.x,pb.y,pb.w,pb.h)){
+        p.alive=false; applyPowerup(p.type);
+      }
+    }
+    state.powerups = state.powerups.filter(p=>p.alive && p.y<H+40);
+
+    updateHUD();
+  }
+
+  function rectHit(ax,ay,aw,ah, bx,by,bw,bh){ return ax<bx+bw && ax+aw>bx && ay<by+bh && ay+ah>by; }
+
+  function hitPlayer(){
+    if (state.effects.shield>0){ // consume one shield
+      state.effects.shield--; flash(160); updateHUD(); return; }
+    state.lives--; updateHUD();
+    flash(220);
+    if (state.lives<=0){ gameOver(); }
+    else {
+      state.bullets.length=0; state.enemyBullets.length=0; state.player.x = W/2; state.player.y = GROUND_Y;
+    }
+  }
+
+  function applyPowerup(type){
+    if (type==='rapid'){ state.effects.rapid = Math.max(state.effects.rapid, PU.rapid.duration); }
+    else if (type==='trishot'){ state.effects.trishot = Math.max(state.effects.trishot, PU.trishot.duration); }
+    else if (type==='shield'){ state.effects.shield = Math.min(5, state.effects.shield + 1); }
+    else if (type==='life'){ state.lives = Math.min(9, state.lives + 1); }
+    pulseHUD(); updateHUD();
+  }
+
+  function gameOver(){ state.over = true; state.paused=true; showOverlay('gameover'); }
+
+  function flash(ms=160){ canvas.style.filter='brightness(1.7) contrast(1.2)'; setTimeout(()=>canvas.style.filter='', ms); }
+  function pulseHUD(){ const hud=document.querySelector('.hud'); hud.style.transform='scale(1.03)'; hud.style.transition='transform .12s'; setTimeout(()=>hud.style.transform='', 140); }
+
+  function render(){
+    // backdrop stars
+    ctx.clearRect(0,0,W,H);
+    drawStars();
+
+    // ground line
+    ctx.save(); ctx.strokeStyle='rgba(255,255,255,.12)'; ctx.beginPath(); ctx.moveTo(20, GROUND_Y+26); ctx.lineTo(W-20, GROUND_Y+26); ctx.stroke(); ctx.restore();
+
+    // player
+    state.player.draw();
+
+    // bullets
+    ctx.save(); ctx.fillStyle='rgba(255,255,255,.92)';
+    for (const b of state.bullets){ drawRect(b.x-2, b.y-8, 4, 12, .95); }
+    ctx.fillStyle='rgba(255,146,146,.98)';
+    for (const b of state.enemyBullets){ drawRect(b.x-2, b.y-6, 4, 10, .95); }
+    ctx.restore();
+
+    // enemies
+    for (const e of state.enemies){ if (!e.alive) continue; drawEmoji(e.emoji, e.x, e.y, e.size); }
+
+    // powerups
+    for (const p of state.powerups){ if (!p.alive) continue; const em = PU[p.type].emoji; drawEmoji(em, p.x, p.y, p.size); }
+
+    // subtle vignette
+    ctx.save();
+    const grad = ctx.createRadialGradient(W/2,H*.4, 80, W/2,H*.4, 500);
+    grad.addColorStop(0, 'rgba(120,232,249,0.04)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad; ctx.fillRect(0,0,W,H); ctx.restore();
+  }
+
+  // tiny starfield
+  const stars = Array.from({length: 120}, () => ({ x: Math.random()*W, y: Math.random()*H, r: Math.random()*1.6+0.3, s: Math.random()*0.3+0.05 }));
+  function drawStars(){
+    ctx.save(); ctx.fillStyle='rgba(255,255,255,.85)';
+    for (const st of stars){ st.y += st.s; if (st.y>H) st.y= -5; ctx.beginPath(); ctx.arc(st.x, st.y, st.r, 0, Math.PI*2); ctx.fill(); }
+    ctx.restore();
+  }
+
+  // Boot
+  restart();
+  state.paused = true; showOverlay('start');
+})();
+</script>
+</body>
+</html>

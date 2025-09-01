@@ -80,7 +80,7 @@
 <body>
     <div id="gameContainer">
         <h1>🚀 GRAVITY GAME 🌌</h1>
-        <div class="score">Score: <span id="score">0</span> | Distance: <span id="distance">0</span>m</div>
+        <div class="score">Level: <span id="level">1</span> | Score: <span id="score">0</span> | Distance: <span id="distance">0</span>m</div>
         <canvas id="gameCanvas" width="800" height="600"></canvas>
         <div class="controls">
             🎮 <strong>SPACE</strong> eller <strong>CLICK</strong> for thrust | <strong>A/D</strong> for å styre | <strong>R</strong> for restart
@@ -112,20 +112,23 @@
             obstacles: [],
             particles: [],
             stars: [],
+            goals: [],          // Added goals array
             camera: { x: 0, y: 0 },
             score: 0,
             distance: 0,
             gameOver: false,
             paused: false,
             keys: {},
-            level: 1
+            level: 1,
+            levelComplete: false,
+            goalReached: false
         };
 
         // Constants
-        const GRAVITY_STRENGTH = 0.15;
-        const THRUST_POWER = 0.3;
+        const GRAVITY_STRENGTH = 0.8;  // Increased from 0.15
+        const THRUST_POWER = 0.5;      // Slightly increased to compensate
         const FRICTION = 0.99;
-        const MAX_SPEED = 8;
+        const MAX_SPEED = 10;          // Increased max speed
 
         // Initialize game
         function init() {
@@ -149,28 +152,47 @@
         function generateLevel() {
             gameState.planets = [];
             gameState.obstacles = [];
+            gameState.goals = [];
+            gameState.levelComplete = false;
+            gameState.goalReached = false;
+            
+            const levelWidth = 1500 + (gameState.level * 300); // Levels get longer
+            const numPlanets = Math.min(4 + gameState.level, 10); // More planets per level
+            const numObstacles = Math.min(10 + gameState.level * 2, 25); // More obstacles
             
             // Generate planets with gravity wells
-            for (let i = 0; i < 6; i++) {
+            for (let i = 0; i < numPlanets; i++) {
                 gameState.planets.push({
-                    x: 200 + i * 300 + Math.random() * 100,
+                    x: 200 + (i * levelWidth / numPlanets) + Math.random() * 200,
                     y: 100 + Math.random() * (H - 200),
-                    radius: 30 + Math.random() * 40,
-                    mass: 50 + Math.random() * 100,
+                    radius: 25 + Math.random() * 35,
+                    mass: 40 + Math.random() * 80 + (gameState.level * 10), // Stronger planets at higher levels
                     color: `hsl(${Math.random() * 360}, 70%, 60%)`
                 });
             }
 
             // Generate obstacles (asteroids)
-            for (let i = 0; i < 15; i++) {
+            for (let i = 0; i < numObstacles; i++) {
                 gameState.obstacles.push({
-                    x: 300 + Math.random() * 1500,
+                    x: 300 + Math.random() * levelWidth,
                     y: Math.random() * H,
-                    radius: 8 + Math.random() * 15,
+                    radius: 6 + Math.random() * 12,
                     rotation: Math.random() * Math.PI * 2,
                     rotSpeed: (Math.random() - 0.5) * 0.05
                 });
             }
+            
+            // Generate goal zone at the end of the level
+            const goalX = levelWidth + 100;
+            const goalY = H/2 + (Math.random() - 0.5) * 200; // Random Y position
+            
+            gameState.goals.push({
+                x: goalX,
+                y: goalY,
+                radius: 60,
+                pulse: 0,
+                collected: false
+            });
         }
 
         function update() {
@@ -217,8 +239,9 @@
                 const dy = planet.y - player.y;
                 const distance = Math.sqrt(dx * dx + dy * dy);
                 
-                if (distance > 0) {
-                    const force = (planet.mass * GRAVITY_STRENGTH) / (distance * distance);
+                // Increased gravity range and made it stronger at closer distances
+                if (distance > 0 && distance < planet.radius * 8) {  // Increased range
+                    const force = (planet.mass * GRAVITY_STRENGTH) / (distance * distance * 0.5); // Stronger force
                     const fx = (dx / distance) * force;
                     const fy = (dy / distance) * force;
                     
@@ -268,6 +291,31 @@
             gameState.obstacles.forEach(obstacle => {
                 obstacle.rotation += obstacle.rotSpeed;
             });
+            
+            // Update goals
+            gameState.goals.forEach(goal => {
+                goal.pulse += 0.1;
+            });
+
+            // Check goal collision
+            gameState.goals.forEach(goal => {
+                if (!goal.collected) {
+                    const dx = goal.x - player.x;
+                    const dy = goal.y - player.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (distance < goal.radius + player.size) {
+                        goal.collected = true;
+                        gameState.goalReached = true;
+                        gameState.score += 1000 * gameState.level; // Bonus points
+                        
+                        // Level complete after short delay
+                        setTimeout(() => {
+                            nextLevel();
+                        }, 1000);
+                    }
+                }
+            });
 
             // Check collisions with planets
             gameState.planets.forEach(planet => {
@@ -315,10 +363,10 @@
 
             // Draw planets
             gameState.planets.forEach(planet => {
-                // Gravity field visualization
+                // Gravity field visualization - made larger to show increased range
                 const gradient = ctx.createRadialGradient(
                     planet.x, planet.y, planet.radius,
-                    planet.x, planet.y, planet.radius * 3
+                    planet.x, planet.y, planet.radius * 6  // Increased from 3 to 6
                 );
                 // Convert HSL to RGBA for proper alpha support
                 const hslMatch = planet.color.match(/hsl\((\d+(?:\.\d+)?), (\d+)%, (\d+)%\)/);
@@ -332,7 +380,7 @@
                 
                 ctx.fillStyle = gradient;
                 ctx.beginPath();
-                ctx.arc(planet.x, planet.y, planet.radius * 3, 0, Math.PI * 2);
+                ctx.arc(planet.x, planet.y, planet.radius * 6, 0, Math.PI * 2);  // Increased visual range
                 ctx.fill();
 
                 // Planet itself
@@ -378,6 +426,55 @@
                 ctx.stroke();
                 
                 ctx.restore();
+            });
+
+            // Draw goals
+            gameState.goals.forEach(goal => {
+                if (!goal.collected) {
+                    // Pulsing goal zone
+                    const pulseSize = 1 + Math.sin(goal.pulse) * 0.2;
+                    const alpha = 0.3 + Math.sin(goal.pulse * 2) * 0.2;
+                    
+                    // Outer glow
+                    const gradient = ctx.createRadialGradient(
+                        goal.x, goal.y, 0,
+                        goal.x, goal.y, goal.radius * pulseSize * 1.5
+                    );
+                    gradient.addColorStop(0, `rgba(0, 255, 0, ${alpha})`);
+                    gradient.addColorStop(1, 'transparent');
+                    
+                    ctx.fillStyle = gradient;
+                    ctx.beginPath();
+                    ctx.arc(goal.x, goal.y, goal.radius * pulseSize * 1.5, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Goal circle
+                    ctx.fillStyle = `rgba(0, 255, 0, ${alpha + 0.3})`;
+                    ctx.beginPath();
+                    ctx.arc(goal.x, goal.y, goal.radius * pulseSize, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Goal border
+                    ctx.strokeStyle = '#00ff00';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.arc(goal.x, goal.y, goal.radius * pulseSize, 0, Math.PI * 2);
+                    ctx.stroke();
+                    
+                    // Goal symbol
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = 'bold 24px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('🎯', goal.x, goal.y + 8);
+                    
+                    // Distance indicator
+                    const distance = Math.sqrt((goal.x - player.x) ** 2 + (goal.y - player.y) ** 2);
+                    if (distance < 300) {
+                        ctx.fillStyle = '#ffffff';
+                        ctx.font = '14px Arial';
+                        ctx.fillText(`${Math.floor(distance)}m`, goal.x, goal.y - goal.radius - 20);
+                    }
+                }
             });
 
             // Draw particles
@@ -476,11 +573,88 @@
                 }
             });
 
+            // Draw goals on minimap
+            gameState.goals.forEach(goal => {
+                if (!goal.collected) {
+                    const x = mapX + (goal.x - gameState.camera.x) * scale;
+                    const y = mapY + (goal.y - gameState.camera.y) * scale;
+                    
+                    if (x >= mapX && x <= mapX + mapSize && y >= mapY && y <= mapY + mapSize) {
+                        ctx.fillStyle = '#00ff00';
+                        ctx.beginPath();
+                        ctx.arc(x, y, 4, 0, Math.PI * 2);
+                        ctx.fill();
+                        
+                        // Pulsing effect on minimap
+                        ctx.strokeStyle = '#00ff00';
+                        ctx.lineWidth = 1;
+                        ctx.beginPath();
+                        ctx.arc(x, y, 4 + Math.sin(Date.now() * 0.01) * 2, 0, Math.PI * 2);
+                        ctx.stroke();
+                    }
+                }
+            });
+
             // Draw player on minimap
             ctx.fillStyle = '#00ffff';
             ctx.beginPath();
             ctx.arc(mapX + mapSize/2, mapY + mapSize/2, 3, 0, Math.PI * 2);
             ctx.fill();
+            
+            // Goal direction indicator
+            if (gameState.goals.length > 0 && !gameState.goals[0].collected) {
+                const goal = gameState.goals[0];
+                const dx = goal.x - player.x;
+                const dy = goal.y - player.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                const angle = Math.atan2(dy, dx);
+                
+                // Draw arrow pointing to goal
+                ctx.save();
+                ctx.translate(W - 60, H - 60);
+                ctx.rotate(angle);
+                
+                ctx.fillStyle = '#00ff00';
+                ctx.beginPath();
+                ctx.moveTo(20, 0);
+                ctx.lineTo(-10, -8);
+                ctx.lineTo(-5, 0);
+                ctx.lineTo(-10, 8);
+                ctx.closePath();
+                ctx.fill();
+                
+                ctx.restore();
+                
+                // Distance to goal
+                ctx.fillStyle = '#00ff00';
+                ctx.font = '12px Courier New';
+                ctx.textAlign = 'center';
+                ctx.fillText(`Goal: ${Math.floor(distance)}m`, W - 60, H - 30);
+            }
+        }
+
+        function nextLevel() {
+            gameState.level++;
+            gameState.player.x = 100;
+            gameState.player.y = H/2;
+            gameState.player.vx = 0;
+            gameState.player.vy = 0;
+            gameState.player.fuel = 100;
+            gameState.goalReached = false;
+            
+            generateLevel();
+            
+            // Show level complete message
+            document.getElementById('gameOverMessage').innerHTML = 
+                `<div style="color: #00ff00; font-size: 20px; margin: 10px 0;">
+                🎯 LEVEL ${gameState.level - 1} COMPLETE! 🎯<br>
+                Starting Level ${gameState.level}...
+                </div>`;
+            
+            setTimeout(() => {
+                document.getElementById('gameOverMessage').innerHTML = '';
+            }, 2000);
+        }
         }
 
         function gameLoop() {
@@ -490,6 +664,7 @@
             // Update score display
             document.getElementById('score').textContent = gameState.score;
             document.getElementById('distance').textContent = gameState.distance;
+            document.getElementById('level').textContent = gameState.level;
             
             requestAnimationFrame(gameLoop);
         }
@@ -516,13 +691,16 @@
                 obstacles: [],
                 particles: [],
                 stars: [],
+                goals: [],
                 camera: { x: 0, y: 0 },
                 score: 0,
                 distance: 0,
                 gameOver: false,
                 paused: false,
                 keys: {},
-                level: 1
+                level: 1,
+                levelComplete: false,
+                goalReached: false
             };
             
             document.getElementById('gameOverMessage').innerHTML = '';

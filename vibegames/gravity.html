@@ -320,7 +320,14 @@
                     planet.x, planet.y, planet.radius,
                     planet.x, planet.y, planet.radius * 3
                 );
-                gradient.addColorStop(0, planet.color + '40');
+                // Convert HSL to RGBA for proper alpha support
+                const hslMatch = planet.color.match(/hsl\((\d+(?:\.\d+)?), (\d+)%, (\d+)%\)/);
+                if (hslMatch) {
+                    const [, h, s, l] = hslMatch;
+                    gradient.addColorStop(0, `hsla(${h}, ${s}%, ${l}%, 0.25)`);
+                } else {
+                    gradient.addColorStop(0, planet.color + '40');
+                }
                 gradient.addColorStop(1, 'transparent');
                 
                 ctx.fillStyle = gradient;

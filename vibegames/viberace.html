@@ -299,15 +299,17 @@
       // Calculate distance relative to player
       const relativeDistance = car.distance - state.position;
       
-      // Only draw cars that are visible (ahead of player)
-      if (relativeDistance > 0 && relativeDistance < 800) {
+      // Only draw cars that are visible (ahead of player, coming towards them)
+      if (relativeDistance > 0 && relativeDistance < 1000) {
         // Calculate scale based on distance (perspective effect)
-        const scale = Math.max(0.3, 1 - (relativeDistance / 800));
+        const scale = Math.max(0.2, 1 - (relativeDistance / 1000));
         
-        const carW = 40 * scale;
-        const carH = 20 * scale;
-        const carX = W/2 + (car.x * 150) - carW/2;
-        const carY = H/2 + (H/4) * (1 - scale) - carH; // Perspective Y position
+        const carW = 50 * scale;
+        const carH = 25 * scale;
+        const carX = W/2 + (car.x * 150 * scale) - carW/2; // Scale position with distance
+        
+        // Cars should appear higher on screen when far away, lower when close
+        const carY = H/3 + (H/2) * (1 - scale) - carH; // Perspective Y position - fixed direction
         
         // Car shadow
         ctx.fillStyle = 'rgba(0,0,0,0.3)';
@@ -318,11 +320,21 @@
         ctx.fillRect(carX, carY, carW, carH);
         
         // Car details (only if big enough)
-        if (scale > 0.5) {
+        if (scale > 0.4) {
           ctx.fillStyle = '#000000';
-          const windowSize = Math.max(2, 6 * scale);
-          ctx.fillRect(carX + 3*scale, carY + 2*scale, windowSize, windowSize);
-          ctx.fillRect(carX + carW - windowSize - 3*scale, carY + 2*scale, windowSize, windowSize);
+          const windowSize = Math.max(2, 8 * scale);
+          ctx.fillRect(carX + 4*scale, carY + 3*scale, windowSize, windowSize);
+          ctx.fillRect(carX + carW - windowSize - 4*scale, carY + 3*scale, windowSize, windowSize);
+          
+          // Wheels for bigger cars
+          if (scale > 0.6) {
+            ctx.fillStyle = '#333333';
+            const wheelSize = 6 * scale;
+            ctx.fillRect(carX + 3*scale, carY - 2, wheelSize, 4);
+            ctx.fillRect(carX + carW - wheelSize - 3*scale, carY - 2, wheelSize, 4);
+            ctx.fillRect(carX + 3*scale, carY + carH - 2, wheelSize, 4);
+            ctx.fillRect(carX + carW - wheelSize - 3*scale, carY + carH - 2, wheelSize, 4);
+          }
         }
       }
     }
@@ -370,7 +382,7 @@
   function drawPlayerCar() {
     const carW = 60;
     const carH = 30;
-    const carX = W/2 + (state.playerX * 100) - carW/2; // Simplified player X calculation
+    const carX = W/2 + (state.playerX * 150) - carW/2; // Extended range for road edges
     const carY = H - 150; // Moved higher up on screen
     
     // Car shadow
@@ -446,7 +458,7 @@
     if (input.left) state.playerX -= dt * 2;
     if (input.right) state.playerX += dt * 2;
     
-    state.playerX = Math.max(-1, Math.min(1, state.playerX));
+    state.playerX = Math.max(-1.5, Math.min(1.5, state.playerX)); // Extended range to road edges
     
     // Speed control - simplified
     if (input.up || input.boost) {
@@ -463,18 +475,19 @@
     // Move forward
     state.position += state.speed * dt;
     
-    // Update AI cars
+    // Update AI cars - they should move towards player (down screen)
     for (const car of state.cars) {
-      car.distance += car.speed * dt;
+      // AI cars move backwards relative to player position (towards player)
+      car.distance -= (state.speed + car.speed) * dt;
       
       // Simple AI behavior - slight lane changes
       car.x += Math.sin(state.lapTime * 2 + car.distance * 0.01) * dt * 0.1;
-      car.x = Math.max(-0.8, Math.min(0.8, car.x));
+      car.x = Math.max(-1.2, Math.min(1.2, car.x));
       
-      // Reset car if it's too far behind
-      if (car.distance < state.position - 300) {
-        car.distance = state.position + 500 + Math.random() * 300;
-        car.x = (Math.random() - 0.5) * 0.6;
+      // Reset car if it's passed the player or too far behind
+      if (car.distance < state.position - 100) {
+        car.distance = state.position + 800 + Math.random() * 400; // Spawn far ahead
+        car.x = (Math.random() - 0.5) * 1.0;
         car.speed = 80 + Math.random() * 40;
       }
     }

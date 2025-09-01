@@ -40,7 +40,7 @@
 <body>
   <div class="wrap">
     <div class="header">
-      <div class="title">🚀 Emoji Space Invaders <span class="badge">v1.1</span></div>
+      <div class="title">🚀 Emoji Space Invaders <span class="badge">v1.2 (Boss & Debuffs)</span></div>
       <div class="hint">Move: <span class="kbd">←</span>/<span class="kbd">→</span> or <span class="kbd">A</span>/<span class="kbd">D</span> · Fire: <span class="kbd">Space</span> · Pause: <span class="kbd">P</span> · Restart: <span class="kbd">R</span></div>
     </div>
     <div class="hud">
@@ -48,6 +48,7 @@
       <span id="level">Level: 1</span>
       <span id="lives">Lives: 3</span>
       <span id="pow">Power-ups: none</span>
+      <span id="deb">Debuffs: none</span>
     </div>
     <div style="position:relative">
       <canvas id="game" width="900" height="700" aria-label="Game canvas" role="img"></canvas>
@@ -103,8 +104,8 @@
     level: 1,
     lives: 3,
     lastTime: 0,
-    enemyDir: 1, // 1 = right, -1 = left
-    enemySpeed: 28, // pixels per second (base, scaled by level & remaining)
+    enemyDir: 1,
+    enemySpeed: 28,
     enemyStepDown: 22,
     enemyTimer: 0,
     enemyShootCooldown: 0,
@@ -112,8 +113,10 @@
     bullets: [],
     enemyBullets: [],
     enemies: [],
-    powerups: [], // falling pickups
-    effects: { rapid:0, trishot:0, shield:0 }
+    boss: null, // boss object when boss level
+    powerups: [], // falling pickups (positive or negative)
+    effects: { rapid:0, trishot:0, shield:0 },
+    debuffs: { slow:0, invert:0, jam:0 }
   };
 
   // --- Input ---
@@ -152,15 +155,23 @@
   // --- Entities ---
   class Player {
     constructor(){
-      this.x = W/2; this.y = GROUND_Y; this.speed = 360; this.cooldown=0; this.size=36;
+      this.x = W/2; this.y = GROUND_Y; this.baseSpeed = 360; this.cooldown=0; this.size=36;
     }
     update(dt){
-      if (input.left) this.x -= this.speed * dt;
-      if (input.right) this.x += this.speed * dt;
+      // effective input (invert)
+      let left=input.left, right=input.right, fire=input.fire;
+      if (state.debuffs.invert>0){ const L=left; left=right; right=L; }
+
+      // movement (slow debuff)
+      const speed = this.baseSpeed * (state.debuffs.slow>0 ? 0.6 : 1);
+      if (left) this.x -= speed * dt;
+      if (right) this.x += speed * dt;
       this.x = Math.max(30, Math.min(W-30, this.x));
+
+      // shooting (jam debuff disables)
       this.cooldown = Math.max(0, this.cooldown - dt);
       const cd = state.effects.rapid>0 ? 0.10 : 0.22;
-      if (input.fire && this.cooldown<=0){
+      if (fire && state.debuffs.jam<=0 && this.cooldown<=0){
         if (state.effects.trishot>0){
           fireBullet(this.x-10, this.y-28, -520, true, -120);
           fireBullet(this.x,     this.y-32, -520, true, 0);
@@ -168,7 +179,7 @@
         } else {
           fireBullet(this.x, this.y-28, -520, true, 0);
         }
-        this.cooldown = cd; // seconds
+        this.cooldown = cd;
       }
     }
     draw(){ drawEmoji(PLAYER_EMOJI, this.x, this.y, 36); }
@@ -176,33 +187,13 @@
   }
 
   function fireBullet(x, y, vy, friendly, vx=0){ state.bullets.push({x,y,vy,vx,friendly,w:4,h:10}); }
-  function fireEnemyBullet(x, y){ state.enemyBullets.push({x,y,vy:220,w:4,h:10}); }
+  function fireEnemyBullet(x, y, vx=0, vy=220){ state.enemyBullets.push({x,y,vy,w:4,h:10,vx}); }
+
+  function isBossLevel(){ return state.level % 3 === 0; }
 
   function initEnemies(){
-    state.enemies = [];
-    state.boss = null;
-    // Boss wave hver 5. level
-    if (state.level % 5 === 0) {
-      // Legg til boss
-      state.boss = {
-        alive: true,
-        x: W/2,
-        y: ENEMY_START_Y + 30,
-        size: 90,
-        emoji: '👹',
-        maxHp: 20 + state.level * 6,
-        hp: 20 + state.level * 6,
-        dir: 1,
-        speed: 120 + state.level * 8,
-        shootCooldown: 0
-      };
-      state.enemyDir = 1;
-      state.enemySpeed = 0;
-      state.enemyTimer = 0;
-      state.enemyShootCooldown = 0;
-      return;
-    }
-    // Vanlige fiender
+    state.enemies = []; state.boss = null;
+    if (isBossLevel()) { initBoss(); return; }
     const offsetX = ENEMY_START_X, offsetY = ENEMY_START_Y;
     for (let r=0; r<ENEMY_ROWS; r++){
       for (let c=0; c<ENEMY_COLS; c++){
@@ -222,29 +213,50 @@
     state.enemyShootCooldown = 0;
   }
 
+  function initBoss(){
+    const hp = 200 + (state.level*40);
+    state.boss = {
+      x: W/2, y: 120, size: 72, emoji:'🛸',
+      w: 90, h: 66,
+      hp, maxHp: hp,
+      dir: 1, vx: 90 + state.level*6,
+      shotCd: 1.2, beamCd: 4.0,
+      shotTimer: 1.5, beamTimer: 3.0,
+      beamActive: 0, // seconds remaining
+    };
+  }
+
   function remainingEnemies(){ return state.enemies.filter(e=>e.alive).length; }
 
-  // --- Power-ups ---
+  // --- Power-ups (positive) ---
   const PU = {
     rapid: { emoji:'⚡', duration:12 },
     trishot: { emoji:'🔱', duration:10 },
     shield: { emoji:'🛡️' },
     life: { emoji:'❤️' }
   };
+
+  // --- Debuffs (negative pickups) ---
+  const DB = {
+    slow:   { emoji:'🐌', duration:10 },  // slower movement
+    invert: { emoji:'🔄', duration:8 },   // inverted controls
+    jam:    { emoji:'🚫', duration:7 }    // cannot fire
+  };
+
   function spawnPowerup(x,y){
-    // Weighted choice
     const r = Math.random();
     let type = r<0.35? 'rapid' : r<0.60? 'trishot' : r<0.85? 'shield' : 'life';
-    state.powerups.push({ x, y, vy: 110 + state.level*8, type, size: 28, alive:true });
+    state.powerups.push({ x, y, vy: 110 + state.level*8, type, size: 28, alive:true, negative:false });
+  }
+  function spawnDebuff(x,y){
+    const keys = Object.keys(DB);
+    const t = keys[Math.floor(Math.random()*keys.length)];
+    state.powerups.push({ x, y, vy: 120 + state.level*10, type:t, size: 28, alive:true, negative:true });
   }
 
   // --- Drawing helpers ---
   function drawEmoji(char, x, y, size){
-    ctx.save();
-    ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.font = `bold ${size}px "Apple Color Emoji", "Segoe UI Emoji", emoji`;
-    ctx.fillText(char, x, y+2);
-    ctx.restore();
+    ctx.save(); ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.font = `bold ${size}px "Apple Color Emoji", "Segoe UI Emoji", emoji`; ctx.fillText(char, x, y+2); ctx.restore();
   }
   function drawRect(x,y,w,h,alpha=.9){ ctx.save(); ctx.globalAlpha=alpha; ctx.fillStyle='#e6f0ff'; ctx.fillRect(x,y,w,h); ctx.restore(); }
 
@@ -253,14 +265,13 @@
   const overlayCard = document.getElementById('overlayCard');
   function hideOverlay(){ overlay.hidden = true; overlay.style.display='none'; overlayCard.innerHTML=''; }
   function showOverlay(kind){
-    overlay.style.display='grid';
-    overlay.hidden = false; overlayCard.innerHTML = '';
+    overlay.style.display='grid'; overlay.hidden = false; overlayCard.innerHTML = '';
     const make = (html)=>{ const d=document.createElement('div'); d.innerHTML=html.trim(); return d.firstElementChild; };
     if (kind==='start'){
       overlayCard.append(
         make(`<h2>🚀 Emoji Space Invaders</h2>`),
-        make(`<p>Defend the sector! Clear all waves to push the invaders back.</p>`),
-        make(`<div class="row"><span class="pill">👾 👽 🤖 🧟 💀</span><span class="pill">Drops: ⚡🔱🛡️❤️</span></div>`),
+        make(`<p>Clear waves, watch for <b>boss levels</b> every 3rd wave (🛸 with laser & barrages).</p>`),
+        make(`<div class="row"><span class="pill">Drops: ⚡🔱🛡️❤️</span><span class="pill">Debuffs: 🐌🔄🚫</span></div>`),
         make(`<p class="small">Controls: ←/→ or A/D · Space to Fire · P Pause · R Restart</p>`),
         make(`<a class="action" href="#" id="btnStart">Start</a>`)
       );
@@ -283,7 +294,7 @@
     if (kind==='levelup'){
       overlayCard.append(
         make(`<h2>✨ Level ${state.level}</h2>`),
-        make(`<p>Speed and enemy fire rate increase. Brace yourself!</p>`),
+        make(`<p>Next wave incoming${isBossLevel()? ' — <b>Boss!</b> 🛸' : ''}</p>`),
         make(`<a class="action" href="#" id="btnNext">Continue</a>`)
       );
       overlayCard.querySelector('#btnNext').addEventListener('click', (e)=>{ e.preventDefault(); hideOverlay(); resume(); });
@@ -298,6 +309,7 @@
   function restart(){
     state.score=0; state.level=1; state.lives=3; state.over=false; state.paused=false;
     state.effects = { rapid:0, trishot:0, shield:0 };
+    state.debuffs = { slow:0, invert:0, jam:0 };
     state.player=new Player(); state.bullets.length=0; state.enemyBullets.length=0; state.powerups.length=0; initEnemies();
     updateHUD();
     state.lastTime = performance.now(); requestAnimationFrame(loop);
@@ -319,12 +331,18 @@
     if (state.effects.trishot>0) icons.push('🔱');
     if (state.effects.shield>0) icons.push('🛡️×'+state.effects.shield);
     document.getElementById('pow').textContent = `Power-ups: ${icons.length? icons.join(' '): 'none'}`;
+
+    const deb = [];
+    if (state.debuffs.slow>0) deb.push('🐌');
+    if (state.debuffs.invert>0) deb.push('🔄');
+    if (state.debuffs.jam>0) deb.push('🚫');
+    document.getElementById('deb').textContent = `Debuffs: ${deb.length? deb.join(' '): 'none'}`;
   }
 
   // --- Loop ---
   function loop(t){
-    if (state.paused || state.over) return; // will resume later
-    const dt = Math.min(0.033, (t - state.lastTime)/1000 || 0); // clamp
+    if (state.paused || state.over) return;
+    const dt = Math.min(0.033, (t - state.lastTime)/1000 || 0);
     state.lastTime = t;
 
     update(dt);
@@ -336,33 +354,24 @@
   function update(dt){
     state.player.update(dt);
 
-    // Timed effects countdown
-    if (state.effects.rapid>0) state.effects.rapid = Math.max(0, state.effects.rapid - dt);
-    if (state.effects.trishot>0) state.effects.trishot = Math.max(0, state.effects.trishot - dt);
+    // Timers
+    for (const k of Object.keys(state.effects)){
+      if (typeof state.effects[k] === 'number') state.effects[k] = Math.max(0, state.effects[k] - dt);
+    }
+    for (const k of Object.keys(state.debuffs)){
+      if (typeof state.debuffs[k] === 'number') state.debuffs[k] = Math.max(0, state.debuffs[k] - dt);
+    }
 
     // Bullets
     for (const b of state.bullets){ b.y += b.vy * dt; if (b.vx) b.x += b.vx * dt; }
-    for (const b of state.enemyBullets){ b.y += b.vy * dt; }
-    state.bullets = state.bullets.filter(b=> b.y>-40 && b.y<H+40 && b.x>-20 && b.x<W+20);
-    state.enemyBullets = state.enemyBullets.filter(b=> b.y>-40 && b.y<H+40);
+    for (const b of state.enemyBullets){ b.y += b.vy * dt; if (b.vx) b.x += b.vx * dt; }
+    state.bullets = state.bullets.filter(b=> b.y>-60 && b.y<H+60 && b.x>-40 && b.x<W+40);
+    state.enemyBullets = state.enemyBullets.filter(b=> b.y>-60 && b.y<H+120 && b.x>-60 && b.x<W+60);
 
-    // Enemy movement
-    // --- Boss wave ---
-    if (state.boss) {
-      const boss = state.boss;
-      if (!boss.alive) { nextLevel(); return; }
-      // Beveg bossen side til side
-      boss.x += boss.dir * boss.speed * dt;
-      if (boss.x - boss.size/2 < ENEMY_MOVE_AREA.left) { boss.x = ENEMY_MOVE_AREA.left + boss.size/2; boss.dir = 1; }
-      if (boss.x + boss.size/2 > ENEMY_MOVE_AREA.right) { boss.x = ENEMY_MOVE_AREA.right - boss.size/2; boss.dir = -1; }
-      // Boss skyter
-      boss.shootCooldown -= dt;
-      if (boss.shootCooldown <= 0) {
-        fireEnemyBullet(boss.x, boss.y + boss.size/2);
-        boss.shootCooldown = 0.7 - Math.min(0.5, state.level*0.03) + Math.random()*0.5;
-      }
+    // Enemy movement or Boss logic
+    if (state.boss){
+      updateBoss(dt);
     } else {
-      // --- Vanlige fiender ---
       const alive = state.enemies.filter(e=>e.alive);
       if (alive.length===0){ nextLevel(); return; }
       const leftMost = Math.min(...alive.map(e=>e.x));
@@ -372,14 +381,8 @@
       const dx = state.enemyDir * currentSpeed * dt;
       for (const e of alive) e.x += dx;
 
-      if (rightMost + 22 >= ENEMY_MOVE_AREA.right && state.enemyDir>0){
-        for (const e of alive) e.y += state.enemyStepDown;
-        state.enemyDir = -1;
-      }
-      if (leftMost - 22 <= ENEMY_MOVE_AREA.left && state.enemyDir<0){
-        for (const e of alive) e.y += state.enemyStepDown;
-        state.enemyDir = 1;
-      }
+      if (rightMost + 22 >= ENEMY_MOVE_AREA.right && state.enemyDir>0){ for (const e of alive) e.y += state.enemyStepDown; state.enemyDir = -1; }
+      if (leftMost - 22 <= ENEMY_MOVE_AREA.left && state.enemyDir<0){ for (const e of alive) e.y += state.enemyStepDown; state.enemyDir = 1; }
 
       // Enemy shooting
       state.enemyShootCooldown -= dt;
@@ -392,79 +395,81 @@
         if (shooter) fireEnemyBullet(shooter.x, shooter.y+18);
         state.enemyShootCooldown = Math.max(0.4, 1.2 - state.level*0.1);
       }
-    }
 
-    // Collisions: player bullets vs boss
-    if (state.boss && state.boss.alive) {
-      for (const b of state.bullets) {
-        if (!b.friendly) continue;
-        const boss = state.boss;
-        if (rectHit(b.x-2, b.y-5, 4, 10, boss.x-boss.size/2, boss.y-boss.size/2, boss.size, boss.size)) {
-          boss.hp--;
-          b.y = -9999;
-          if (boss.hp <= 0) {
-            boss.alive = false;
-            state.score += 200 + state.level*10;
-            // TODO: spawn debuff her
-          }
-        }
-      }
-    } else {
-      // Collisions: player bullets vs enemies (and powerup drops)
-      for (const b of state.bullets){
-        if (!b.friendly) continue;
-        for (const e of alive){
-          if (!e.alive) continue;
-          if (rectHit(b.x-2,b.y-5,4,10, e.x-20, e.y-20, 40,40)){
-            e.alive=false; b.y=-9999; state.score += 10 + (ENEMY_ROWS-e.row)*2;
-            const dropChance = Math.min(0.18 + state.level*0.02, 0.35);
-            if (Math.random() < dropChance) spawnPowerup(e.x, e.y);
-          }
-        }
-      }
+      // Collisions: player bullets vs enemies (and drops)
+      for (const b of state.bullets){ if (!b.friendly) continue; for (const e of alive){ if (!e.alive) continue; if (rectHit(b.x-2,b.y-5,4,10, e.x-20, e.y-20, 40,40)){ e.alive=false; b.y=-9999; state.score += 10 + (ENEMY_ROWS-e.row)*2; maybeDrop(e.x, e.y); } } }
+
+      // Enemies reach ground or collide with player
+      const pb = state.player.getBounds();
+      for (const e of alive){ if (e.y+20 >= GROUND_Y-10) { gameOver(); return; } if (rectHit(e.x-18,e.y-18,36,36, pb.x,pb.y,pb.w,pb.h)){ gameOver(); return; } }
     }
 
     // Enemy bullets vs player
     const pb = state.player.getBounds();
     for (const eb of state.enemyBullets){ if (rectHit(eb.x-2, eb.y-5, 4,10, pb.x,pb.y,pb.w,pb.h)){ eb.y=9999; hitPlayer(); return; } }
 
-    // Boss kolliderer med spiller eller når bakken
-    if (state.boss && state.boss.alive) {
-      const boss = state.boss;
-      if (boss.y + boss.size/2 >= GROUND_Y-10) { gameOver(); return; }
-      if (rectHit(boss.x-boss.size/2, boss.y-boss.size/2, boss.size, boss.size, pb.x,pb.y,pb.w,pb.h)) { gameOver(); return; }
-    } else {
-      // Enemies reach ground or collide with player
-      for (const e of alive){
-        if (e.y+20 >= GROUND_Y-10) { gameOver(); return; }
-        if (rectHit(e.x-18,e.y-18,36,36, pb.x,pb.y,pb.w,pb.h)){ gameOver(); return; }
-      }
-    }
-
     // Power-ups fall & collect
     for (const p of state.powerups){ p.y += p.vy * dt; }
-    for (const p of state.powerups){
-      if (!p.alive) continue;
-      if (rectHit(p.x-16,p.y-16,32,32, pb.x,pb.y,pb.w,pb.h)){
-        p.alive=false; applyPowerup(p.type);
-      }
-    }
+    for (const p of state.powerups){ if (!p.alive) continue; if (rectHit(p.x-16,p.y-16,32,32, pb.x,pb.y,pb.w,pb.h)){ p.alive=false; if (p.negative) applyDebuff(p.type); else applyPowerup(p.type); } }
     state.powerups = state.powerups.filter(p=>p.alive && p.y<H+40);
 
     updateHUD();
   }
 
+  function maybeDrop(x,y){
+    const dropChance = Math.min(0.18 + state.level*0.02, 0.35);
+    const debuffChance = Math.min(0.08 + state.level*0.01, 0.18);
+    if (Math.random() < dropChance) spawnPowerup(x,y);
+    else if (Math.random() < debuffChance) spawnDebuff(x,y);
+  }
+
+  function updateBoss(dt){
+    const b = state.boss; if (!b) return;
+    // Move
+    b.x += b.dir * b.vx * dt;
+    if (b.x - b.w/2 < ENEMY_MOVE_AREA.left){ b.x = ENEMY_MOVE_AREA.left + b.w/2; b.dir = 1; }
+    if (b.x + b.w/2 > ENEMY_MOVE_AREA.right){ b.x = ENEMY_MOVE_AREA.right - b.w/2; b.dir = -1; }
+
+    // Timers
+    b.shotTimer -= dt; b.beamTimer -= dt; if (b.beamActive>0) b.beamActive -= dt;
+
+    // Fire patterns
+    if (b.shotTimer<=0){ bossBarrage(); b.shotTimer = Math.max(0.6, b.shotCd - state.level*0.05); }
+    if (b.beamTimer<=0 && !b.beamActive){ b.beamActive = 1.2; b.beamTimer = Math.max(2.6, b.beamCd - state.level*0.08); }
+
+    // Player bullets vs Boss
+    for (const proj of state.bullets){ if (!proj.friendly) continue; if (rectHit(proj.x-2,proj.y-5,4,10, b.x-b.w/2, b.y-b.h/2, b.w, b.h)){ proj.y=-9999; b.hp -= (state.effects.trishot>0? 2:1); state.score += 3; if (b.hp<=0){ // boss dead
+          // Big drops
+          for (let i=0;i<3;i++) spawnPowerup(b.x + (i-1)*28, b.y+10);
+          if (Math.random()<0.5) spawnDebuff(b.x, b.y);
+          state.boss=null; nextLevel(); return; }
+      } }
+
+    // Boss beam collision (vertical beam)
+    if (b.beamActive>0){
+      const beamX = b.x, beamW = 28; // beam width
+      const pb = state.player.getBounds();
+      const hit = rectHit(beamX-beamW/2, b.y, beamW, H, pb.x, pb.y, pb.w, pb.h);
+      if (hit){ hitPlayer(); }
+    }
+  }
+
+  function bossBarrage(){
+    const b = state.boss; if (!b) return;
+    // 5-way fan
+    const speeds = [ -180, -90, 0, 90, 180 ];
+    for (const vx of speeds){ fireEnemyBullet(b.x, b.y+30, vx*0.6, 260); }
+    // plus a few straight shots
+    for (let i=0;i<3;i++) fireEnemyBullet(b.x + (i-1)*18, b.y+30, 0, 300);
+  }
+
   function rectHit(ax,ay,aw,ah, bx,by,bw,bh){ return ax<bx+bw && ax+aw>bx && ay<by+bh && ay+ah>by; }
 
   function hitPlayer(){
-    if (state.effects.shield>0){ // consume one shield
-      state.effects.shield--; flash(160); updateHUD(); return; }
-    state.lives--; updateHUD();
-    flash(220);
+    if (state.effects.shield>0){ state.effects.shield--; flash(160); updateHUD(); return; }
+    state.lives--; updateHUD(); flash(220);
     if (state.lives<=0){ gameOver(); }
-    else {
-      state.bullets.length=0; state.enemyBullets.length=0; state.player.x = W/2; state.player.y = GROUND_Y;
-    }
+    else { state.bullets.length=0; state.enemyBullets.length=0; state.player.x = W/2; state.player.y = GROUND_Y; }
   }
 
   function applyPowerup(type){
@@ -474,6 +479,12 @@
     else if (type==='life'){ state.lives = Math.min(9, state.lives + 1); }
     pulseHUD(); updateHUD();
   }
+  function applyDebuff(type){
+    if (type==='slow'){ state.debuffs.slow = Math.max(state.debuffs.slow, DB.slow.duration); }
+    else if (type==='invert'){ state.debuffs.invert = Math.max(state.debuffs.invert, DB.invert.duration); }
+    else if (type==='jam'){ state.debuffs.jam = Math.max(state.debuffs.jam, DB.jam.duration); }
+    flash(180); updateHUD();
+  }
 
   function gameOver(){ state.over = true; state.paused=true; showOverlay('gameover'); }
 
@@ -482,8 +493,7 @@
 
   function render(){
     // backdrop stars
-    ctx.clearRect(0,0,W,H);
-    drawStars();
+    ctx.clearRect(0,0,W,H); drawStars();
 
     // ground line
     ctx.save(); ctx.strokeStyle='rgba(255,255,255,.12)'; ctx.beginPath(); ctx.moveTo(20, GROUND_Y+26); ctx.lineTo(W-20, GROUND_Y+26); ctx.stroke(); ctx.restore();
@@ -492,55 +502,44 @@
     state.player.draw();
 
     // bullets
-    ctx.save(); ctx.fillStyle='rgba(255,255,255,.92)';
-    for (const b of state.bullets){ drawRect(b.x-2, b.y-8, 4, 12, .95); }
-    ctx.fillStyle='rgba(255,146,146,.98)';
-    for (const b of state.enemyBullets){ drawRect(b.x-2, b.y-6, 4, 10, .95); }
-    ctx.restore();
-
-    // boss
-    if (state.boss && state.boss.alive) {
-      drawEmoji(state.boss.emoji, state.boss.x, state.boss.y, state.boss.size);
-      // Boss HP bar
-      ctx.save();
-      const barW = 220, barH = 18;
-      const hpPct = state.boss.hp / state.boss.maxHp;
-      ctx.globalAlpha = 0.92;
-      ctx.fillStyle = '#222';
-      ctx.fillRect(W/2 - barW/2, 32, barW, barH);
-      ctx.fillStyle = '#ff7b7b';
-      ctx.fillRect(W/2 - barW/2, 32, barW * hpPct, barH);
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(W/2 - barW/2, 32, barW, barH);
-      ctx.font = 'bold 16px sans-serif';
-      ctx.fillStyle = '#fff';
-      ctx.textAlign = 'center';
-      ctx.fillText('Boss HP', W/2, 46);
-      ctx.restore();
-    }
+    ctx.save(); ctx.fillStyle='rgba(255,255,255,.92)'; for (const b of state.bullets){ drawRect(b.x-2, b.y-8, 4, 12, .95); }
+    ctx.fillStyle='rgba(255,146,146,.98)'; for (const b of state.enemyBullets){ drawRect(b.x-2, b.y-6, 4, 10, .95); } ctx.restore();
 
     // enemies
     for (const e of state.enemies){ if (!e.alive) continue; drawEmoji(e.emoji, e.x, e.y, e.size); }
 
-    // powerups
-    for (const p of state.powerups){ if (!p.alive) continue; const em = PU[p.type].emoji; drawEmoji(em, p.x, p.y, p.size); }
+    // boss
+    if (state.boss){ const b = state.boss; drawEmoji(b.emoji, b.x, b.y, b.size); drawBossHealthBar(b); if (b.beamActive>0){ drawBeam(b.x, b.y); } }
+
+    // powerups/debuffs
+    for (const p of state.powerups){ if (!p.alive) continue; const em = p.negative ? DB[p.type].emoji : PU[p.type].emoji; drawEmoji(em, p.x, p.y, p.size); }
 
     // subtle vignette
+    ctx.save(); const grad = ctx.createRadialGradient(W/2,H*.4, 80, W/2,H*.4, 500); grad.addColorStop(0, 'rgba(120,232,249,0.04)'); grad.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = grad; ctx.fillRect(0,0,W,H); ctx.restore();
+  }
+
+  function drawBossHealthBar(b){
+    const bw = 220, bh = 10, x = W/2 - bw/2, y = 30;
     ctx.save();
-    const grad = ctx.createRadialGradient(W/2,H*.4, 80, W/2,H*.4, 500);
-    grad.addColorStop(0, 'rgba(120,232,249,0.04)');
-    grad.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = grad; ctx.fillRect(0,0,W,H); ctx.restore();
+    ctx.fillStyle = 'rgba(255,255,255,.15)'; ctx.fillRect(x,y,bw,bh);
+    const pct = Math.max(0, b.hp / b.maxHp);
+    ctx.fillStyle = '#ff7070'; ctx.fillRect(x, y, bw*pct, bh);
+    ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.strokeRect(x,y,bw,bh);
+    ctx.restore();
+  }
+  function drawBeam(cx, topY){
+    ctx.save();
+    const beamW = 28;
+    const grad = ctx.createLinearGradient(cx, topY, cx, H);
+    grad.addColorStop(0, 'rgba(255,120,120,0.85)');
+    grad.addColorStop(1, 'rgba(255,50,50,0.1)');
+    ctx.fillStyle = grad; ctx.fillRect(cx - beamW/2, topY+20, beamW, H);
+    ctx.restore();
   }
 
   // tiny starfield
   const stars = Array.from({length: 120}, () => ({ x: Math.random()*W, y: Math.random()*H, r: Math.random()*1.6+0.3, s: Math.random()*0.3+0.05 }));
-  function drawStars(){
-    ctx.save(); ctx.fillStyle='rgba(255,255,255,.85)';
-    for (const st of stars){ st.y += st.s; if (st.y>H) st.y= -5; ctx.beginPath(); ctx.arc(st.x, st.y, st.r, 0, Math.PI*2); ctx.fill(); }
-    ctx.restore();
-  }
+  function drawStars(){ ctx.save(); ctx.fillStyle='rgba(255,255,255,.85)'; for (const st of stars){ st.y += st.s; if (st.y>H) st.y= -5; ctx.beginPath(); ctx.arc(st.x, st.y, st.r, 0, Math.PI*2); ctx.fill(); } ctx.restore(); }
 
   // Boot
   restart();

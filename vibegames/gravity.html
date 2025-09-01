@@ -525,8 +525,6 @@
         }
 
         function drawUI() {
-            const player = gameState.player;
-
             // Fuel bar
             ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
             ctx.fillRect(10, 10, 204, 24);
@@ -534,15 +532,15 @@
             ctx.fillStyle = '#333333';
             ctx.fillRect(12, 12, 200, 20);
             
-            ctx.fillStyle = player.fuel > 30 ? '#00ff00' : '#ff0000';
-            ctx.fillRect(12, 12, (player.fuel / 100) * 200, 20);
+            ctx.fillStyle = gameState.player.fuel > 30 ? '#00ff00' : '#ff0000';
+            ctx.fillRect(12, 12, (gameState.player.fuel / 100) * 200, 20);
             
             ctx.fillStyle = '#ffffff';
             ctx.font = '12px Courier New';
             ctx.fillText('FUEL', 16, 26);
 
             // Speed indicator
-            const speed = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
+            const speed = Math.sqrt(gameState.player.vx * gameState.player.vx + gameState.player.vy * gameState.player.vy);
             ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
             ctx.fillRect(10, 40, 150, 20);
             ctx.fillStyle = '#ffffff';
@@ -604,8 +602,8 @@
             // Goal direction indicator
             if (gameState.goals.length > 0 && !gameState.goals[0].collected) {
                 const goal = gameState.goals[0];
-                const dx = goal.x - player.x;
-                const dy = goal.y - player.y;
+                const dx = goal.x - gameState.player.x;
+                const dy = goal.y - gameState.player.y;
                 const distance = Math.sqrt(dx * dx + dy * dy);
                 const angle = Math.atan2(dy, dx);
                 

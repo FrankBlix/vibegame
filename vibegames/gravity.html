@@ -80,7 +80,7 @@
 <body>
     <div id="gameContainer">
         <h1>🚀 GRAVITY GAME 🌌</h1>
-        <div class="score">Level: <span id="level">1</span> | Score: <span id="score">0</span> | Distance: <span id="distance">0</span>m</div>
+        <div class="score">Level: <span id="level">1</span> | Score: <span id="score">0</span> | Distance: <span id="distance">0</span>m | Lives: <span id="lives">3</span></div>
         <canvas id="gameCanvas" width="800" height="600"></canvas>
         <div class="controls">
             🎮 <strong>SPACE</strong> eller <strong>CLICK</strong> for thrust | <strong>A/D</strong> for å styre | <strong>R</strong> for restart
@@ -121,7 +121,16 @@
             keys: {},
             level: 1,
             levelComplete: false,
-            goalReached: false
+            goalReached: false,
+            lives: 3,           // Added lives system
+            maxLives: 3,
+            invulnerable: 0,    // Invulnerability frames after death
+            boundaries: {       // Added boundary system
+                top: -200,
+                bottom: H + 200,
+                left: -300,
+                right: 3000 + (1 * 300) // Extends with level
+            }
         };
 
         // Constants
@@ -159,6 +168,10 @@
             const levelWidth = 1500 + (gameState.level * 300); // Levels get longer
             const numPlanets = Math.min(4 + gameState.level, 10); // More planets per level
             const numObstacles = Math.min(10 + gameState.level * 2, 25); // More obstacles
+            
+            // Update boundaries for this level
+            gameState.boundaries.right = levelWidth + 500;
+            gameState.boundaries.left = -300;
             
             // Generate planets with gravity wells
             for (let i = 0; i < numPlanets; i++) {
@@ -276,6 +289,11 @@
             if (player.fuel < 100) {
                 player.fuel += 0.1;
             }
+            
+            // Update invulnerability timer
+            if (gameState.invulnerable > 0) {
+                gameState.invulnerable--;
+            }
 
             // Update particles
             gameState.particles = gameState.particles.filter(particle => {
@@ -323,8 +341,8 @@
                 const dy = planet.y - player.y;
                 const distance = Math.sqrt(dx * dx + dy * dy);
                 
-                if (distance < planet.radius + player.size) {
-                    gameOver();
+                if (distance < planet.radius + player.size && gameState.invulnerable === 0) {
+                    loseLife();
                 }
             });
 
@@ -334,13 +352,46 @@
                 const dy = obstacle.y - player.y;
                 const distance = Math.sqrt(dx * dx + dy * dy);
                 
-                if (distance < obstacle.radius + player.size) {
-                    gameOver();
+                if (distance < obstacle.radius + player.size && gameState.invulnerable === 0) {
+                    loseLife();
                 }
             });
 
             // Check boundaries
-            if (player.y < 0 || player.y > H * 2) {
+            if (player.x < gameState.boundaries.left || 
+                player.x > gameState.boundaries.right ||
+                player.y < gameState.boundaries.top || 
+                player.y > gameState.boundaries.bottom) {
+                
+                if (gameState.invulnerable === 0) {
+                    loseLife();
+                }
+            }
+        }
+
+        function loseLife() {
+            if (gameState.lives > 1) {
+                gameState.lives--;
+                gameState.invulnerable = 120; // 2 seconds of invulnerability at 60fps
+                
+                // Reset player position to safe location
+                gameState.player.x = Math.max(100, gameState.player.x - 200);
+                gameState.player.y = H/2;
+                gameState.player.vx = 0;
+                gameState.player.vy = 0;
+                gameState.player.fuel = 100;
+                
+                // Show life lost message
+                document.getElementById('gameOverMessage').innerHTML = 
+                    `<div style="color: #ff6600; font-size: 18px; margin: 10px 0;">
+                    💥 LIFE LOST! 💥<br>
+                    Lives remaining: ${gameState.lives}
+                    </div>`;
+                
+                setTimeout(() => {
+                    document.getElementById('gameOverMessage').innerHTML = '';
+                }, 1500);
+            } else {
                 gameOver();
             }
         }
@@ -352,6 +403,37 @@
 
             ctx.save();
             ctx.translate(-gameState.camera.x, -gameState.camera.y);
+
+            // Draw boundaries
+            ctx.strokeStyle = '#ff0000';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([10, 10]);
+            
+            // Top boundary
+            ctx.beginPath();
+            ctx.moveTo(gameState.boundaries.left, gameState.boundaries.top);
+            ctx.lineTo(gameState.boundaries.right, gameState.boundaries.top);
+            ctx.stroke();
+            
+            // Bottom boundary
+            ctx.beginPath();
+            ctx.moveTo(gameState.boundaries.left, gameState.boundaries.bottom);
+            ctx.lineTo(gameState.boundaries.right, gameState.boundaries.bottom);
+            ctx.stroke();
+            
+            // Left boundary
+            ctx.beginPath();
+            ctx.moveTo(gameState.boundaries.left, gameState.boundaries.top);
+            ctx.lineTo(gameState.boundaries.left, gameState.boundaries.bottom);
+            ctx.stroke();
+            
+            // Right boundary
+            ctx.beginPath();
+            ctx.moveTo(gameState.boundaries.right, gameState.boundaries.top);
+            ctx.lineTo(gameState.boundaries.right, gameState.boundaries.bottom);
+            ctx.stroke();
+            
+            ctx.setLineDash([]); // Reset line dash
 
             // Draw stars
             ctx.fillStyle = '#ffffff';
@@ -490,22 +572,27 @@
             ctx.translate(player.x, player.y);
             ctx.rotate(player.angle);
 
-            // Ship body
-            ctx.fillStyle = '#00ffff';
-            ctx.beginPath();
-            ctx.moveTo(15, 0);
-            ctx.lineTo(-10, -8);
-            ctx.lineTo(-5, 0);
-            ctx.lineTo(-10, 8);
-            ctx.closePath();
-            ctx.fill();
+            // Invulnerability blinking effect
+            const isVisible = gameState.invulnerable === 0 || Math.floor(gameState.invulnerable / 5) % 2 === 0;
+            
+            if (isVisible) {
+                // Ship body
+                ctx.fillStyle = '#00ffff';
+                ctx.beginPath();
+                ctx.moveTo(15, 0);
+                ctx.lineTo(-10, -8);
+                ctx.lineTo(-5, 0);
+                ctx.lineTo(-10, 8);
+                ctx.closePath();
+                ctx.fill();
 
-            // Ship glow
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 1;
-            ctx.stroke();
+                // Ship glow
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            }
 
-            // Thrust effect
+            // Thrust effect (always visible)
             if (player.thrust && player.fuel > 0) {
                 ctx.fillStyle = '#ff6600';
                 ctx.beginPath();
@@ -545,11 +632,24 @@
             ctx.fillRect(10, 40, 150, 20);
             ctx.fillStyle = '#ffffff';
             ctx.fillText(`Speed: ${speed.toFixed(1)}`, 15, 54);
+            
+            // Lives indicator
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(10, 65, 120, 20);
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText('Lives:', 15, 79);
+            
+            // Draw heart icons for lives
+            for (let i = 0; i < gameState.maxLives; i++) {
+                ctx.fillStyle = i < gameState.lives ? '#ff0000' : '#333333';
+                ctx.font = '16px Arial';
+                ctx.fillText('❤️', 55 + i * 20, 79);
+            }
 
             // Mini map
             const mapSize = 120;
             const mapX = W - mapSize - 10;
-            const mapY = 10;
+            const mapY = 90; // Moved down to make room for lives
             
             ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
             ctx.fillRect(mapX, mapY, mapSize, mapSize);
@@ -639,15 +739,26 @@
             gameState.player.vy = 0;
             gameState.player.fuel = 100;
             gameState.goalReached = false;
+            gameState.invulnerable = 0;
+            
+            // Bonus life every 3 levels
+            if (gameState.level % 3 === 0 && gameState.lives < gameState.maxLives) {
+                gameState.lives++;
+                document.getElementById('gameOverMessage').innerHTML = 
+                    `<div style="color: #00ff00; font-size: 20px; margin: 10px 0;">
+                    🎯 LEVEL ${gameState.level - 1} COMPLETE! 🎯<br>
+                    ❤️ BONUS LIFE GAINED! ❤️<br>
+                    Starting Level ${gameState.level}...
+                    </div>`;
+            } else {
+                document.getElementById('gameOverMessage').innerHTML = 
+                    `<div style="color: #00ff00; font-size: 20px; margin: 10px 0;">
+                    🎯 LEVEL ${gameState.level - 1} COMPLETE! 🎯<br>
+                    Starting Level ${gameState.level}...
+                    </div>`;
+            }
             
             generateLevel();
-            
-            // Show level complete message
-            document.getElementById('gameOverMessage').innerHTML = 
-                `<div style="color: #00ff00; font-size: 20px; margin: 10px 0;">
-                🎯 LEVEL ${gameState.level - 1} COMPLETE! 🎯<br>
-                Starting Level ${gameState.level}...
-                </div>`;
             
             setTimeout(() => {
                 document.getElementById('gameOverMessage').innerHTML = '';
@@ -662,6 +773,7 @@
             document.getElementById('score').textContent = gameState.score;
             document.getElementById('distance').textContent = gameState.distance;
             document.getElementById('level').textContent = gameState.level;
+            document.getElementById('lives').textContent = gameState.lives;
             
             requestAnimationFrame(gameLoop);
         }
@@ -697,7 +809,16 @@
                 keys: {},
                 level: 1,
                 levelComplete: false,
-                goalReached: false
+                goalReached: false,
+                lives: 3,
+                maxLives: 3,
+                invulnerable: 0,
+                boundaries: {
+                    top: -200,
+                    bottom: H + 200,
+                    left: -300,
+                    right: 3000 + (1 * 300)
+                }
             };
             
             document.getElementById('gameOverMessage').innerHTML = '';

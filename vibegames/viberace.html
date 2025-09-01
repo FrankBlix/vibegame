@@ -309,7 +309,7 @@
         const carX = W/2 + (car.x * 150 * scale) - carW/2; // Scale position with distance
         
         // Cars should appear higher on screen when far away, lower when close
-        const carY = H/3 + (H/2) * (1 - scale) - carH; // Perspective Y position - fixed direction
+        const carY = H/4 + (H/2) * scale - carH; // Cars move down screen as they get closer
         
         // Car shadow
         ctx.fillStyle = 'rgba(0,0,0,0.3)';

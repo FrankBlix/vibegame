@@ -249,7 +249,7 @@
     
     // Create houses for this day
     for (let i = 0; i < state.target; i++) {
-      const houseY = -i * 120 - 100;
+      const houseY = i * 120 + 100;
       const houseX = HOUSE_POSITIONS[i % HOUSE_POSITIONS.length];
       state.houses.push(new House(houseX, houseY, 'target'));
     }
@@ -417,8 +417,10 @@
     for (const paper of state.thrownPapers) {
       for (const house of state.houses) {
         if (!house.delivered && house.type === 'target') {
+          const houseScreenY = house.y - state.worldOffset;
           const paperBounds = { x: paper.x - 8, y: paper.y - 8, w: 16, h: 16 };
-          if (rectHit(paperBounds, house.getBounds())) {
+          const houseBounds = { x: house.x - house.size/2, y: houseScreenY - house.size/2, w: house.size + 50, h: house.size };
+          if (rectHit(paperBounds, houseBounds)) {
             house.delivered = true;
             paper.y = H + 100; // Remove paper
             state.delivered++;
@@ -487,16 +489,13 @@
     ctx.fillRect(W - ROAD_WIDTH - SIDEWALK_WIDTH, 0, SIDEWALK_WIDTH, H);
     
     ctx.save();
-    ctx.translate(0, state.worldOffset % 200);
     
     // Draw houses (with world offset)
     for (const house of state.houses) {
-      const screenY = house.y + state.worldOffset;
+      const screenY = house.y - state.worldOffset;
       if (screenY > -100 && screenY < H + 100) {
-        ctx.save();
-        ctx.translate(0, -state.worldOffset);
-        house.draw();
-        ctx.restore();
+        drawEmoji(house.delivered ? '✅' : '🏠', house.x, screenY, house.size);
+        drawEmoji('📫', house.x + 25, screenY + 20, 20);
       }
     }
     

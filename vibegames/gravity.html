@@ -75,6 +75,62 @@
             transform: scale(1.05);
             box-shadow: 0 0 15px rgba(0, 255, 255, 0.6);
         }
+        
+        .highscore-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        
+        .highscore-content {
+            background: linear-gradient(135deg, #0a0a2e, #16213e);
+            border: 3px solid #00ffff;
+            border-radius: 15px;
+            padding: 30px;
+            max-width: 500px;
+            width: 90%;
+            color: #ffffff;
+            text-align: center;
+        }
+        
+        .name-input {
+            background: #1a1a3a;
+            border: 2px solid #00ffff;
+            border-radius: 5px;
+            color: #ffffff;
+            padding: 10px;
+            font-size: 16px;
+            margin: 10px;
+            text-align: center;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .highscore-list {
+            text-align: left;
+            margin: 20px 0;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .highscore-entry {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 10px;
+            margin: 2px 0;
+            background: rgba(0, 255, 255, 0.1);
+            border-radius: 3px;
+        }
+        
+        .current-score {
+            background: rgba(255, 255, 0, 0.3) !important;
+            border: 1px solid #ffff00;
+        }
     </style>
 </head>
 <body>
@@ -83,11 +139,36 @@
         <div class="score">Level: <span id="level">1</span> | Score: <span id="score">0</span> | Distance: <span id="distance">0</span>m | Lives: <span id="lives">3</span></div>
         <canvas id="gameCanvas" width="800" height="600"></canvas>
         <div class="controls">
-            🎮 <strong>SPACE/↑</strong> for thrust | <strong>A/D</strong> eller <strong>←/→</strong> for å styre | <strong>R</strong> for restart
+            🎮 <strong>SPACE/↑</strong> for thrust | <strong>A/D</strong> eller <strong>←/→</strong> for å styre | <strong>R</strong> for restart<br>
+            🌍 <strong>Online highscores enabled!</strong> Share this link: <span id="gameUrl" style="color: #00ffff;"></span>
         </div>
         <div id="gameOverMessage"></div>
         <button onclick="restartGame()">🔄 Restart</button>
         <button onclick="togglePause()">⏸️ Pause</button>
+        <button onclick="showHighscores()">🏆 Highscores</button>
+    </div>
+
+    <!-- Highscore Modal -->
+    <div id="highscoreModal" class="highscore-modal">
+        <div class="highscore-content">
+            <h2>🏆 HIGHSCORES 🏆</h2>
+            <div id="highscoreList" class="highscore-list"></div>
+            <button onclick="closeHighscores()">Close</button>
+        </div>
+    </div>
+
+    <!-- Name Input Modal -->
+    <div id="nameModal" class="highscore-modal">
+        <div class="highscore-content">
+            <h2>🎯 NEW HIGHSCORE! 🎯</h2>
+            <p>Score: <span id="finalScore"></span></p>
+            <p>Level: <span id="finalLevel"></span></p>
+            <p>Enter your name:</p>
+            <input type="text" id="playerName" class="name-input" maxlength="12" placeholder="Your Name" />
+            <br>
+            <button onclick="saveHighscore()">💾 Save Score</button>
+            <button onclick="skipHighscore()">Skip</button>
+        </div>
     </div>
 
     <script>
@@ -138,11 +219,33 @@
         const THRUST_POWER = 0.5;      // Slightly increased to compensate
         const FRICTION = 0.99;
         const MAX_SPEED = 10;          // Increased max speed
+        const MAX_HIGHSCORES = 10;     // Maximum number of highscores to keep
+        
+        // Online highscore API (using JSONBin.io as a simple database)
+        // TO SETUP ONLINE HIGHSCORES:
+        // 1. Go to jsonbin.io and create a free account
+        // 2. Create a new bin with: {"highscores": []}
+        // 3. Replace YOUR_BIN_ID below with your bin ID
+        // 4. Replace YOUR_API_KEY below with your master key
+        // 5. Update all 3 places in code where these values appear
+        // See ONLINE_HIGHSCORE_SETUP.md for detailed instructions
+        const HIGHSCORE_API = {
+            url: 'https://api.jsonbin.io/v3/b/68b5a75343b1c97be933289f', // Replace YOUR_BIN_ID with your actual bin ID
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Master-Key': '$2a$10$nvMRsLTXp3zWURa8pcyL4u1Io.z8DnRwUIT2NT3GCmdJzrWCwdV3K' // Replace YOUR_API_KEY with your actual API key
+            }
+        };
 
         // Initialize game
         function init() {
+            // Show current URL for sharing
+            document.getElementById('gameUrl').textContent = window.location.href;
+            
             generateStars();
             generateLevel();
+            loadHighscores();
+            loadOnlineHighscores();
             gameLoop();
         }
 
@@ -780,8 +883,208 @@
 
         function gameOver() {
             gameState.gameOver = true;
+            
+            // Check if this is a highscore (check both local and online)
+            const allHighscores = [...localHighscores, ...onlineHighscores];
+            allHighscores.sort((a, b) => b.score - a.score);
+            const uniqueHighscores = allHighscores.slice(0, MAX_HIGHSCORES);
+            
+            const isHighscore = uniqueHighscores.length < MAX_HIGHSCORES || 
+                               gameState.score > uniqueHighscores[uniqueHighscores.length - 1].score;
+            
+            if (isHighscore) {
+                // Show name input modal
+                document.getElementById('finalScore').textContent = gameState.score;
+                document.getElementById('finalLevel').textContent = gameState.level;
+                document.getElementById('nameModal').style.display = 'flex';
+                document.getElementById('playerName').focus();
+            } else {
+                // Show regular game over message
+                document.getElementById('gameOverMessage').innerHTML = 
+                    `<div class="game-over">💥 GAME OVER! 💥<br>Final Score: ${gameState.score}<br>Distance: ${gameState.distance}m</div>`;
+            }
+        }
+
+        // Highscore management functions
+        let onlineHighscores = [];
+        let localHighscores = [];
+
+        function getLocalHighscores() {
+            const stored = localStorage.getItem('gravityGameHighscores');
+            return stored ? JSON.parse(stored) : [];
+        }
+
+        async function loadOnlineHighscores() {
+            try {
+                const response = await fetch('https://api.jsonbin.io/v3/b/YOUR_BIN_ID/latest', {
+                    method: 'GET',
+                    headers: {
+                        'X-Master-Key': 'YOUR_API_KEY' // Replace with your API key
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    onlineHighscores = data.record.highscores || [];
+                    console.log(`Loaded ${onlineHighscores.length} online highscores`);
+                } else {
+                    console.log('Using local highscores only');
+                    onlineHighscores = [];
+                }
+            } catch (error) {
+                console.log('Failed to load online highscores, using local:', error);
+                onlineHighscores = [];
+            }
+        }
+
+        async function saveOnlineHighscore(scoreData) {
+            try {
+                // Add to online scores
+                onlineHighscores.push(scoreData);
+                onlineHighscores.sort((a, b) => b.score - a.score);
+                
+                // Keep only top scores
+                if (onlineHighscores.length > MAX_HIGHSCORES) {
+                    onlineHighscores.splice(MAX_HIGHSCORES);
+                }
+
+                const response = await fetch('https://api.jsonbin.io/v3/b/YOUR_BIN_ID', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Master-Key': 'YOUR_API_KEY' // Replace with your API key
+                    },
+                    body: JSON.stringify({ highscores: onlineHighscores })
+                });
+
+                if (response.ok) {
+                    console.log('Online highscore saved successfully!');
+                    return true;
+                } else {
+                    console.log('Failed to save online highscore');
+                    return false;
+                }
+            } catch (error) {
+                console.log('Error saving online highscore:', error);
+                return false;
+            }
+        }
+
+        function saveLocalHighscoreData(name, score, level, distance) {
+            const highscores = getLocalHighscores();
+            const newScore = {
+                name: name || 'Anonymous',
+                score: score,
+                level: level,
+                distance: distance,
+                date: new Date().toLocaleDateString(),
+                time: new Date().toLocaleTimeString()
+            };
+            
+            highscores.push(newScore);
+            highscores.sort((a, b) => b.score - a.score);
+            
+            // Keep only top scores
+            if (highscores.length > MAX_HIGHSCORES) {
+                highscores.splice(MAX_HIGHSCORES);
+            }
+            
+            localStorage.setItem('gravityGameHighscores', JSON.stringify(highscores));
+            return newScore;
+        }
+
+        function loadHighscores() {
+            // Load local highscores
+            localHighscores = getLocalHighscores();
+            console.log(`Loaded ${localHighscores.length} local highscores`);
+        }
+
+        async function saveHighscore() {
+            const name = document.getElementById('playerName').value.trim();
+            
+            // Save locally first
+            const scoreData = saveLocalHighscoreData(name, gameState.score, gameState.level, gameState.distance);
+            
+            // Show saving message
+            document.getElementById('nameModal').style.display = 'none';
+            document.getElementById('gameOverMessage').innerHTML = 
+                `<div class="game-over">💾 Saving highscore online... 💾</div>`;
+            
+            // Try to save online
+            const onlineSaved = await saveOnlineHighscore(scoreData);
+            
+            // Show final message
+            const message = onlineSaved ? 
+                `<div class="game-over">🏆 GLOBAL HIGHSCORE SAVED! 🏆<br>Score: ${gameState.score}<br>Shared with the world! 🌍</div>` :
+                `<div class="game-over">🏆 LOCAL HIGHSCORE SAVED! 🏆<br>Score: ${gameState.score}<br>(Online save failed)</div>`;
+            
+            document.getElementById('gameOverMessage').innerHTML = message;
+        }
+
+        function skipHighscore() {
+            document.getElementById('nameModal').style.display = 'none';
             document.getElementById('gameOverMessage').innerHTML = 
                 `<div class="game-over">💥 GAME OVER! 💥<br>Final Score: ${gameState.score}<br>Distance: ${gameState.distance}m</div>`;
+        }
+
+        function showHighscores() {
+            // Combine and sort all highscores
+            const allHighscores = [...localHighscores, ...onlineHighscores];
+            allHighscores.sort((a, b) => b.score - a.score);
+            
+            // Remove duplicates and keep top scores
+            const uniqueScores = [];
+            const seen = new Set();
+            
+            for (const score of allHighscores) {
+                const key = `${score.name}-${score.score}-${score.date}`;
+                if (!seen.has(key) && uniqueScores.length < MAX_HIGHSCORES) {
+                    seen.add(key);
+                    uniqueScores.push(score);
+                }
+            }
+            
+            const listElement = document.getElementById('highscoreList');
+            
+            if (uniqueScores.length === 0) {
+                listElement.innerHTML = '<p style="text-align: center; color: #888;">No highscores yet!</p>';
+            } else {
+                let html = '<h3>🌍 Global Highscores 🌍</h3>';
+                uniqueScores.forEach((score, index) => {
+                    const isLocal = localHighscores.some(local => 
+                        local.name === score.name && local.score === score.score && local.date === score.date
+                    );
+                    const isOnline = onlineHighscores.some(online => 
+                        online.name === score.name && online.score === score.score && online.date === score.date
+                    );
+                    
+                    const source = isOnline ? '🌍' : '💻';
+                    const title = isOnline ? 'Global score' : 'Local score only';
+                    
+                    html += `
+                        <div class="highscore-entry" title="${title}">
+                            <span>${index + 1}. ${score.name} ${source}</span>
+                            <span>${score.score.toLocaleString()}</span>
+                        </div>
+                        <div style="font-size: 12px; color: #888; margin-left: 20px; margin-bottom: 5px;">
+                            Level ${score.level} • ${score.distance}m • ${score.date}
+                        </div>
+                    `;
+                });
+                
+                html += '<br><p style="font-size: 12px; text-align: center; color: #888;">🌍 = Global score | 💻 = Local only</p>';
+                listElement.innerHTML = html;
+            }
+            
+            document.getElementById('highscoreModal').style.display = 'flex';
+        }
+
+        function closeHighscores() {
+            document.getElementById('highscoreModal').style.display = 'none';
+        }
+
+        function togglePause() {
+            gameState.paused = !gameState.paused;
         }
 
         function restartGame() {
@@ -822,6 +1125,52 @@
             };
             
             document.getElementById('gameOverMessage').innerHTML = '';
+            document.getElementById('nameModal').style.display = 'none';
+            document.getElementById('highscoreModal').style.display = 'none';
+            generateStars();
+            generateLevel();
+        }
+
+        function restartGame() {
+            gameState = {
+                player: {
+                    x: 100,
+                    y: H/2,
+                    vx: 0,
+                    vy: 0,
+                    angle: 0,
+                    thrust: false,
+                    fuel: 100,
+                    size: 12
+                },
+                planets: [],
+                obstacles: [],
+                particles: [],
+                stars: [],
+                goals: [],
+                camera: { x: 0, y: 0 },
+                score: 0,
+                distance: 0,
+                gameOver: false,
+                paused: false,
+                keys: {},
+                level: 1,
+                levelComplete: false,
+                goalReached: false,
+                lives: 3,
+                maxLives: 3,
+                invulnerable: 0,
+                boundaries: {
+                    top: -200,
+                    bottom: H + 200,
+                    left: -300,
+                    right: 3000 + (1 * 300)
+                }
+            };
+            
+            document.getElementById('gameOverMessage').innerHTML = '';
+            document.getElementById('nameModal').style.display = 'none';
+            document.getElementById('highscoreModal').style.display = 'none';
             generateStars();
             generateLevel();
         }
@@ -835,6 +1184,11 @@
             gameState.keys[e.key] = true;
             if (e.key === 'r' || e.key === 'R') {
                 restartGame();
+            }
+            // Handle Enter key in name input
+            if (e.key === 'Enter' && document.getElementById('nameModal').style.display === 'flex') {
+                saveHighscore();
+                return;
             }
             // Prevent default behavior for arrow keys to avoid page scrolling
             if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {

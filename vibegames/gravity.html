@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🚀 Gravity Game - Vibe Edition</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #0a0a2e, #16213e, #1a1a3a);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: 'Courier New', monospace;
+            color: #ffffff;
+        }
+        
+        #gameContainer {
+            text-align: center;
+            background: rgba(0, 0, 0, 0.8);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 0 30px rgba(0, 255, 255, 0.3);
+        }
+        
+        canvas {
+            border: 3px solid #00ffff;
+            border-radius: 10px;
+            background: linear-gradient(180deg, #000428, #004e92);
+            box-shadow: inset 0 0 50px rgba(0, 255, 255, 0.1);
+        }
+        
+        .controls {
+            margin: 15px 0;
+            font-size: 14px;
+            color: #00ffff;
+        }
+        
+        .score {
+            font-size: 18px;
+            font-weight: bold;
+            margin: 10px 0;
+            color: #ffff00;
+            text-shadow: 0 0 10px rgba(255, 255, 0, 0.5);
+        }
+        
+        .game-over {
+            color: #ff0000;
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 0 0 10px rgba(255, 0, 0, 0.7);
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        button {
+            background: linear-gradient(45deg, #00ffff, #0080ff);
+            border: none;
+            color: #000;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        
+        button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 15px rgba(0, 255, 255, 0.6);
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <h1>🚀 GRAVITY GAME 🌌</h1>
+        <div class="score">Score: <span id="score">0</span> | Distance: <span id="distance">0</span>m</div>
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        <div class="controls">
+            🎮 <strong>SPACE</strong> eller <strong>CLICK</strong> for thrust | <strong>A/D</strong> for å styre | <strong>R</strong> for restart
+        </div>
+        <div id="gameOverMessage"></div>
+        <button onclick="restartGame()">🔄 Restart</button>
+        <button onclick="togglePause()">⏸️ Pause</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const W = canvas.width;
+        const H = canvas.height;
+
+        // Game state
+        let gameState = {
+            player: {
+                x: 100,
+                y: H/2,
+                vx: 0,
+                vy: 0,
+                angle: 0,
+                thrust: false,
+                fuel: 100,
+                size: 12
+            },
+            planets: [],
+            obstacles: [],
+            particles: [],
+            stars: [],
+            camera: { x: 0, y: 0 },
+            score: 0,
+            distance: 0,
+            gameOver: false,
+            paused: false,
+            keys: {},
+            level: 1
+        };
+
+        // Constants
+        const GRAVITY_STRENGTH = 0.15;
+        const THRUST_POWER = 0.3;
+        const FRICTION = 0.99;
+        const MAX_SPEED = 8;
+
+        // Initialize game
+        function init() {
+            generateStars();
+            generateLevel();
+            gameLoop();
+        }
+
+        function generateStars() {
+            gameState.stars = [];
+            for (let i = 0; i < 200; i++) {
+                gameState.stars.push({
+                    x: Math.random() * W * 5,
+                    y: Math.random() * H * 3,
+                    size: Math.random() * 2 + 0.5,
+                    brightness: Math.random()
+                });
+            }
+        }
+
+        function generateLevel() {
+            gameState.planets = [];
+            gameState.obstacles = [];
+            
+            // Generate planets with gravity wells
+            for (let i = 0; i < 6; i++) {
+                gameState.planets.push({
+                    x: 200 + i * 300 + Math.random() * 100,
+                    y: 100 + Math.random() * (H - 200),
+                    radius: 30 + Math.random() * 40,
+                    mass: 50 + Math.random() * 100,
+                    color: `hsl(${Math.random() * 360}, 70%, 60%)`
+                });
+            }
+
+            // Generate obstacles (asteroids)
+            for (let i = 0; i < 15; i++) {
+                gameState.obstacles.push({
+                    x: 300 + Math.random() * 1500,
+                    y: Math.random() * H,
+                    radius: 8 + Math.random() * 15,
+                    rotation: Math.random() * Math.PI * 2,
+                    rotSpeed: (Math.random() - 0.5) * 0.05
+                });
+            }
+        }
+
+        function update() {
+            if (gameState.gameOver || gameState.paused) return;
+
+            const player = gameState.player;
+
+            // Handle input
+            if (gameState.keys[' '] || gameState.keys['Space']) {
+                player.thrust = true;
+            } else {
+                player.thrust = false;
+            }
+
+            if (gameState.keys['a'] || gameState.keys['A']) {
+                player.angle -= 0.1;
+            }
+            if (gameState.keys['d'] || gameState.keys['D']) {
+                player.angle += 0.1;
+            }
+
+            // Apply thrust
+            if (player.thrust && player.fuel > 0) {
+                player.vx += Math.cos(player.angle) * THRUST_POWER;
+                player.vy += Math.sin(player.angle) * THRUST_POWER;
+                player.fuel -= 0.5;
+                
+                // Create thrust particles
+                for (let i = 0; i < 3; i++) {
+                    gameState.particles.push({
+                        x: player.x - Math.cos(player.angle) * 15,
+                        y: player.y - Math.sin(player.angle) * 15,
+                        vx: -Math.cos(player.angle) * 3 + (Math.random() - 0.5) * 2,
+                        vy: -Math.sin(player.angle) * 3 + (Math.random() - 0.5) * 2,
+                        life: 20,
+                        maxLife: 20
+                    });
+                }
+            }
+
+            // Apply gravity from planets
+            gameState.planets.forEach(planet => {
+                const dx = planet.x - player.x;
+                const dy = planet.y - player.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance > 0) {
+                    const force = (planet.mass * GRAVITY_STRENGTH) / (distance * distance);
+                    const fx = (dx / distance) * force;
+                    const fy = (dy / distance) * force;
+                    
+                    player.vx += fx;
+                    player.vy += fy;
+                }
+            });
+
+            // Apply friction and speed limit
+            player.vx *= FRICTION;
+            player.vy *= FRICTION;
+            
+            const speed = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
+            if (speed > MAX_SPEED) {
+                player.vx = (player.vx / speed) * MAX_SPEED;
+                player.vy = (player.vy / speed) * MAX_SPEED;
+            }
+
+            // Update position
+            player.x += player.vx;
+            player.y += player.vy;
+
+            // Update camera
+            gameState.camera.x = player.x - W/2;
+            gameState.camera.y = player.y - H/2;
+
+            // Update distance and score
+            gameState.distance = Math.floor(player.x / 10);
+            gameState.score += Math.floor(speed);
+
+            // Regenerate fuel slowly
+            if (player.fuel < 100) {
+                player.fuel += 0.1;
+            }
+
+            // Update particles
+            gameState.particles = gameState.particles.filter(particle => {
+                particle.x += particle.vx;
+                particle.y += particle.vy;
+                particle.life--;
+                particle.vx *= 0.95;
+                particle.vy *= 0.95;
+                return particle.life > 0;
+            });
+
+            // Update obstacles
+            gameState.obstacles.forEach(obstacle => {
+                obstacle.rotation += obstacle.rotSpeed;
+            });
+
+            // Check collisions with planets
+            gameState.planets.forEach(planet => {
+                const dx = planet.x - player.x;
+                const dy = planet.y - player.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance < planet.radius + player.size) {
+                    gameOver();
+                }
+            });
+
+            // Check collisions with obstacles
+            gameState.obstacles.forEach(obstacle => {
+                const dx = obstacle.x - player.x;
+                const dy = obstacle.y - player.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance < obstacle.radius + player.size) {
+                    gameOver();
+                }
+            });
+
+            // Check boundaries
+            if (player.y < 0 || player.y > H * 2) {
+                gameOver();
+            }
+        }
+
+        function render() {
+            // Clear canvas
+            ctx.fillStyle = 'rgba(0, 4, 40, 0.1)';
+            ctx.fillRect(0, 0, W, H);
+
+            ctx.save();
+            ctx.translate(-gameState.camera.x, -gameState.camera.y);
+
+            // Draw stars
+            ctx.fillStyle = '#ffffff';
+            gameState.stars.forEach(star => {
+                ctx.globalAlpha = 0.3 + star.brightness * 0.7;
+                ctx.fillRect(star.x, star.y, star.size, star.size);
+            });
+            ctx.globalAlpha = 1;
+
+            // Draw planets
+            gameState.planets.forEach(planet => {
+                // Gravity field visualization
+                const gradient = ctx.createRadialGradient(
+                    planet.x, planet.y, planet.radius,
+                    planet.x, planet.y, planet.radius * 3
+                );
+                gradient.addColorStop(0, planet.color + '40');
+                gradient.addColorStop(1, 'transparent');
+                
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(planet.x, planet.y, planet.radius * 3, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Planet itself
+                ctx.fillStyle = planet.color;
+                ctx.beginPath();
+                ctx.arc(planet.x, planet.y, planet.radius, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Planet glow
+                ctx.strokeStyle = planet.color;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(planet.x, planet.y, planet.radius + 5, 0, Math.PI * 2);
+                ctx.stroke();
+            });
+
+            // Draw obstacles (asteroids)
+            gameState.obstacles.forEach(obstacle => {
+                ctx.save();
+                ctx.translate(obstacle.x, obstacle.y);
+                ctx.rotate(obstacle.rotation);
+                
+                ctx.fillStyle = '#666666';
+                ctx.strokeStyle = '#999999';
+                ctx.lineWidth = 1;
+                
+                // Draw irregular asteroid shape
+                ctx.beginPath();
+                for (let i = 0; i < 8; i++) {
+                    const angle = (i / 8) * Math.PI * 2;
+                    const radius = obstacle.radius * (0.8 + Math.sin(i * 2) * 0.2);
+                    const x = Math.cos(angle) * radius;
+                    const y = Math.sin(angle) * radius;
+                    
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+                
+                ctx.restore();
+            });
+
+            // Draw particles
+            gameState.particles.forEach(particle => {
+                const alpha = particle.life / particle.maxLife;
+                ctx.fillStyle = `rgba(255, 100, 0, ${alpha})`;
+                ctx.fillRect(particle.x - 1, particle.y - 1, 2, 2);
+            });
+
+            // Draw player ship
+            const player = gameState.player;
+            ctx.save();
+            ctx.translate(player.x, player.y);
+            ctx.rotate(player.angle);
+
+            // Ship body
+            ctx.fillStyle = '#00ffff';
+            ctx.beginPath();
+            ctx.moveTo(15, 0);
+            ctx.lineTo(-10, -8);
+            ctx.lineTo(-5, 0);
+            ctx.lineTo(-10, 8);
+            ctx.closePath();
+            ctx.fill();
+
+            // Ship glow
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            // Thrust effect
+            if (player.thrust && player.fuel > 0) {
+                ctx.fillStyle = '#ff6600';
+                ctx.beginPath();
+                ctx.moveTo(-10, -4);
+                ctx.lineTo(-20, 0);
+                ctx.lineTo(-10, 4);
+                ctx.closePath();
+                ctx.fill();
+            }
+
+            ctx.restore();
+
+            ctx.restore();
+
+            // Draw UI
+            drawUI();
+        }
+
+        function drawUI() {
+            const player = gameState.player;
+
+            // Fuel bar
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(10, 10, 204, 24);
+            
+            ctx.fillStyle = '#333333';
+            ctx.fillRect(12, 12, 200, 20);
+            
+            ctx.fillStyle = player.fuel > 30 ? '#00ff00' : '#ff0000';
+            ctx.fillRect(12, 12, (player.fuel / 100) * 200, 20);
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '12px Courier New';
+            ctx.fillText('FUEL', 16, 26);
+
+            // Speed indicator
+            const speed = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(10, 40, 150, 20);
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(`Speed: ${speed.toFixed(1)}`, 15, 54);
+
+            // Mini map
+            const mapSize = 120;
+            const mapX = W - mapSize - 10;
+            const mapY = 10;
+            
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+            ctx.fillRect(mapX, mapY, mapSize, mapSize);
+            ctx.strokeStyle = '#00ffff';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(mapX, mapY, mapSize, mapSize);
+
+            // Draw planets on minimap
+            const scale = mapSize / 2000;
+            gameState.planets.forEach(planet => {
+                const x = mapX + (planet.x - gameState.camera.x) * scale;
+                const y = mapY + (planet.y - gameState.camera.y) * scale;
+                
+                if (x >= mapX && x <= mapX + mapSize && y >= mapY && y <= mapY + mapSize) {
+                    ctx.fillStyle = planet.color;
+                    ctx.beginPath();
+                    ctx.arc(x, y, Math.max(2, planet.radius * scale), 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+
+            // Draw player on minimap
+            ctx.fillStyle = '#00ffff';
+            ctx.beginPath();
+            ctx.arc(mapX + mapSize/2, mapY + mapSize/2, 3, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function gameLoop() {
+            update();
+            render();
+            
+            // Update score display
+            document.getElementById('score').textContent = gameState.score;
+            document.getElementById('distance').textContent = gameState.distance;
+            
+            requestAnimationFrame(gameLoop);
+        }
+
+        function gameOver() {
+            gameState.gameOver = true;
+            document.getElementById('gameOverMessage').innerHTML = 
+                `<div class="game-over">💥 GAME OVER! 💥<br>Final Score: ${gameState.score}<br>Distance: ${gameState.distance}m</div>`;
+        }
+
+        function restartGame() {
+            gameState = {
+                player: {
+                    x: 100,
+                    y: H/2,
+                    vx: 0,
+                    vy: 0,
+                    angle: 0,
+                    thrust: false,
+                    fuel: 100,
+                    size: 12
+                },
+                planets: [],
+                obstacles: [],
+                particles: [],
+                stars: [],
+                camera: { x: 0, y: 0 },
+                score: 0,
+                distance: 0,
+                gameOver: false,
+                paused: false,
+                keys: {},
+                level: 1
+            };
+            
+            document.getElementById('gameOverMessage').innerHTML = '';
+            generateStars();
+            generateLevel();
+        }
+
+        function togglePause() {
+            gameState.paused = !gameState.paused;
+        }
+
+        // Event listeners
+        document.addEventListener('keydown', (e) => {
+            gameState.keys[e.key] = true;
+            if (e.key === 'r' || e.key === 'R') {
+                restartGame();
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            gameState.keys[e.key] = false;
+        });
+
+        canvas.addEventListener('click', () => {
+            gameState.keys[' '] = true;
+            setTimeout(() => gameState.keys[' '] = false, 100);
+        });
+
+        // Start game
+        init();
+    </script>
+</body>
+</html>

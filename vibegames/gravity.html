@@ -916,7 +916,7 @@
 
         async function loadOnlineHighscores() {
             try {
-                const response = await fetch('https://api.jsonbin.io/v3/b/YOUR_BIN_ID/latest', {
+                const response = await fetch('https://api.jsonbin.io/v3/b/68b5a75343b1c97be933289f/latest', {
                     method: 'GET',
                     headers: {
                         'X-Master-Key': 'YOUR_API_KEY' // Replace with your API key
@@ -948,7 +948,7 @@
                     onlineHighscores.splice(MAX_HIGHSCORES);
                 }
 
-                const response = await fetch('https://api.jsonbin.io/v3/b/YOUR_BIN_ID', {
+                const response = await fetch('https://api.jsonbin.io/v3/b/68b5a75343b1c97be933289f', {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',

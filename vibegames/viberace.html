@@ -253,43 +253,78 @@
       ctx.fillStyle = '#228B22';
       ctx.fillRect(0, H/2, W, H/2);
       
-      // Simple road for testing
+      // Road with perspective
       ctx.fillStyle = '#444444';
-      const roadWidth = W * 0.3;
-      ctx.fillRect(W/2 - roadWidth/2, H/3, roadWidth, H*2/3);
+      const roadWidth = W * 0.4;
+      const roadTop = H/3;
+      const roadBottom = H;
       
-      // Center line
+      // Draw road as trapezoid for perspective
+      ctx.beginPath();
+      ctx.moveTo(W/2 - roadWidth*0.2, roadTop); // Top left
+      ctx.lineTo(W/2 + roadWidth*0.2, roadTop); // Top right
+      ctx.lineTo(W/2 + roadWidth*0.5, roadBottom); // Bottom right
+      ctx.lineTo(W/2 - roadWidth*0.5, roadBottom); // Bottom left
+      ctx.closePath();
+      ctx.fill();
+      
+      // Center lines with perspective
       ctx.fillStyle = '#FFFFFF';
-      for (let y = H/3; y < H; y += 40) {
-        ctx.fillRect(W/2 - 2, y, 4, 20);
+      for (let i = 0; i < 10; i++) {
+        const progress = i / 10;
+        const y = roadTop + (roadBottom - roadTop) * progress;
+        const width = 2 + progress * 3; // Lines get wider towards bottom
+        const lineWidth = 15 + progress * 25; // Line segments get longer
+        
+        // Animate the lines
+        const offset = (state.position * 0.05) % 60;
+        if ((y + offset) % 60 < 30) {
+          ctx.fillRect(W/2 - width/2, y, width, lineWidth);
+        }
       }
       
       // Draw player car
       drawPlayerCar();
       
-      // Draw simple test cars
-      drawTestCars();
+      // Draw AI cars
+      drawAICars();
       
     } catch (e) {
       console.error('Render error:', e);
     }
   }
   
-  function drawTestCars() {
-    // Draw some test cars on the road
-    for (let i = 0; i < 3; i++) {
-      const carX = W/2 + (Math.sin(state.lapTime + i) * 50);
-      const carY = H/2 + i * 60;
-      const carW = 40;
-      const carH = 20;
+  function drawAICars() {
+    for (const car of state.cars) {
+      // Calculate distance relative to player
+      const relativeDistance = car.distance - state.position;
       
-      // Car shadow
-      ctx.fillStyle = 'rgba(0,0,0,0.3)';
-      ctx.fillRect(carX + 3, carY + 3, carW, carH);
-      
-      // Car body
-      ctx.fillStyle = ['#FF0000', '#00FF00', '#0000FF'][i];
-      ctx.fillRect(carX, carY, carW, carH);
+      // Only draw cars that are visible (ahead of player)
+      if (relativeDistance > 0 && relativeDistance < 800) {
+        // Calculate scale based on distance (perspective effect)
+        const scale = Math.max(0.3, 1 - (relativeDistance / 800));
+        
+        const carW = 40 * scale;
+        const carH = 20 * scale;
+        const carX = W/2 + (car.x * 150) - carW/2;
+        const carY = H/2 + (H/4) * (1 - scale) - carH; // Perspective Y position
+        
+        // Car shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.fillRect(carX + 2, carY + 2, carW, carH);
+        
+        // Car body
+        ctx.fillStyle = car.color;
+        ctx.fillRect(carX, carY, carW, carH);
+        
+        // Car details (only if big enough)
+        if (scale > 0.5) {
+          ctx.fillStyle = '#000000';
+          const windowSize = Math.max(2, 6 * scale);
+          ctx.fillRect(carX + 3*scale, carY + 2*scale, windowSize, windowSize);
+          ctx.fillRect(carX + carW - windowSize - 3*scale, carY + 2*scale, windowSize, windowSize);
+        }
+      }
     }
   }
 
@@ -336,7 +371,7 @@
     const carW = 60;
     const carH = 30;
     const carX = W/2 + (state.playerX * 100) - carW/2; // Simplified player X calculation
-    const carY = H - 80;
+    const carY = H - 150; // Moved higher up on screen
     
     // Car shadow
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
@@ -391,8 +426,18 @@
   // --- AI Cars ---
   function spawnCars() {
     state.cars = [];
-    // Simplified - just for testing, we'll use the test cars in render
-    console.log('Cars spawned (simplified version)');
+    const colors = ['#0000FF', '#00FF00', '#FFFF00', '#FF00FF', '#00FFFF', '#FFA500', '#800080'];
+    
+    for (let i = 0; i < 5; i++) {
+      state.cars.push({
+        x: (Math.random() - 0.5) * 0.6, // Position on road (-0.6 to 0.6)
+        distance: state.position + (i + 1) * 100 + Math.random() * 200, // Distance ahead
+        speed: 80 + Math.random() * 40, // Speed variation
+        color: colors[i],
+        lane: Math.random() > 0.5 ? -0.3 : 0.3 // Left or right lane
+      });
+    }
+    console.log('Cars spawned:', state.cars.length);
   }
 
   // --- Game logic ---
@@ -417,6 +462,22 @@
     
     // Move forward
     state.position += state.speed * dt;
+    
+    // Update AI cars
+    for (const car of state.cars) {
+      car.distance += car.speed * dt;
+      
+      // Simple AI behavior - slight lane changes
+      car.x += Math.sin(state.lapTime * 2 + car.distance * 0.01) * dt * 0.1;
+      car.x = Math.max(-0.8, Math.min(0.8, car.x));
+      
+      // Reset car if it's too far behind
+      if (car.distance < state.position - 300) {
+        car.distance = state.position + 500 + Math.random() * 300;
+        car.x = (Math.random() - 0.5) * 0.6;
+        car.speed = 80 + Math.random() * 40;
+      }
+    }
     
     // Simple lap detection
     if (state.position > 10000) { // Simplified lap length

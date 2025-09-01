@@ -324,6 +324,21 @@
       overlayCard.querySelector('#btnRestart').addEventListener('click', () => { hideOverlay(); restart(); });
     }
     
+    if (kind === 'levelComplete') {
+      const efficiency = Math.round((state.delivered / state.target) * 100);
+      const papersBonus = state.papers * 10;
+      const totalBonus = state.target * 50 + papersBonus;
+      
+      overlayCard.append(
+        make(`<h2>🎉 Level ${state.day - 1} Complete!</h2>`),
+        make(`<p>Delivered: <b>${state.delivered}/${state.target}</b> papers (${efficiency}% efficiency)</p>`),
+        make(`<p>Papers left: <b>${state.papers}</b> · Bonus: <b>+${totalBonus}</b></p>`),
+        make(`<div class="row"><span class="pill">🏘️⭐ Target Houses</span><span class="pill">🏚️ Regular Houses</span></div>`),
+        make(`<button class="action" id="btnNextLevel">Level ${state.day}</button>`)
+      );
+      overlayCard.querySelector('#btnNextLevel').addEventListener('click', nextDay);
+    }
+    
     if (kind === 'dayComplete') {
       overlayCard.append(
         make(`<h2>✅ Day ${state.day} Complete!</h2>`),
@@ -357,12 +372,17 @@
     requestAnimationFrame(loop);
   }
 
-  function nextDay() {
+  function nextLevel() {
     state.day++;
     state.delivered = 0;
-    state.papers = 20 + state.day * 2;
-    state.target = Math.min(15, 10 + state.day);
-    state.speed += 10;
+    state.papers = Math.max(15, 20 + state.day * 2); // Flere aviser hver level
+    state.target = Math.min(20, 8 + state.day * 2); // Flere hus å levere til
+    state.speed += 15; // Raskere hastighet
+    state.paused = true;
+    showOverlay('levelComplete');
+  }
+
+  function nextDay() {
     hideOverlay();
     initGame();
     updateHUD();
@@ -373,7 +393,7 @@
     document.getElementById('score').textContent = `Score: ${state.score}`;
     document.getElementById('papers').textContent = `Papers: ${state.papers}`;
     document.getElementById('delivered').textContent = `Delivered: ${state.delivered}/${state.target}`;
-    document.getElementById('day').textContent = `Day: ${state.day}`;
+    document.getElementById('day').textContent = `Level: ${state.day}`;
   }
 
   // --- Game loop ---
@@ -441,14 +461,7 @@
             paper.y = H + 100; // Remove paper
             state.delivered++;
             state.score += 100;
-            
-            if (state.delivered >= state.target) {
-              // Day complete
-              state.score += state.target * 50;
-              state.paused = true;
-              showOverlay('dayComplete');
-              return;
-            }
+            // Level completion check moved to main update loop
           }
         }
       }
@@ -461,6 +474,20 @@
         gameOver();
         return;
       }
+    }
+    
+    // Check level completion conditions
+    if (state.delivered >= state.target || state.papers <= 0) {
+      if (state.delivered >= state.target) {
+        // Level complete - delivered all papers
+        state.score += state.target * 50 + state.papers * 10; // Bonus for leftover papers
+        nextLevel();
+      } else {
+        // Out of papers but not all delivered
+        state.score += state.delivered * 50;
+        nextLevel(); // Still go to next level but with less score
+      }
+      return;
     }
     
     updateHUD();
@@ -510,14 +537,24 @@
     for (const house of state.houses) {
       const screenY = house.y - state.worldOffset;
       if (screenY > -100 && screenY < H + 100) {
-        let houseEmoji = '🏡'; // Vanlig hus
+        let houseEmoji = '�️'; // Forfallent hus (ikke levér til)
+        let mailboxEmoji = '📪'; // Tom postkasse
+        
         if (house.delivered) {
-          houseEmoji = '✅'; // Levert
+          houseEmoji = '🎉'; // Levert - feiring!
+          mailboxEmoji = '📬'; // Full postkasse
         } else if (house.type === 'target') {
-          houseEmoji = '🏠'; // Målhus (blått)
+          houseEmoji = '�️'; // Pent hus med flagg (levér til dette!)
+          mailboxEmoji = '📭'; // Åpen postkasse som venter på avis
         }
+        
         drawEmoji(houseEmoji, house.x, screenY, house.size);
-        drawEmoji('📫', house.x + 35, screenY + 25, 25); // Større postkasse
+        drawEmoji(mailboxEmoji, house.x + 35, screenY + 25, 25);
+        
+        // Legg til ekstra visuell indikator for målhus
+        if (house.type === 'target' && !house.delivered) {
+          drawEmoji('⭐', house.x - 25, screenY - 25, 20); // Stjerne over målhus
+        }
       }
     }
     

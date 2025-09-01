@@ -468,7 +468,7 @@
                     ctx.fillText('🎯', goal.x, goal.y + 8);
                     
                     // Distance indicator
-                    const distance = Math.sqrt((goal.x - player.x) ** 2 + (goal.y - player.y) ** 2);
+                    const distance = Math.sqrt((goal.x - gameState.player.x) ** 2 + (goal.y - gameState.player.y) ** 2);
                     if (distance < 300) {
                         ctx.fillStyle = '#ffffff';
                         ctx.font = '14px Arial';

@@ -83,7 +83,7 @@
         <div class="score">Level: <span id="level">1</span> | Score: <span id="score">0</span> | Distance: <span id="distance">0</span>m | Lives: <span id="lives">3</span></div>
         <canvas id="gameCanvas" width="800" height="600"></canvas>
         <div class="controls">
-            🎮 <strong>SPACE</strong> eller <strong>CLICK</strong> for thrust | <strong>A/D</strong> for å styre | <strong>R</strong> for restart
+            🎮 <strong>SPACE/↑</strong> for thrust | <strong>A/D</strong> eller <strong>←/→</strong> for å styre | <strong>R</strong> for restart
         </div>
         <div id="gameOverMessage"></div>
         <button onclick="restartGame()">🔄 Restart</button>
@@ -214,16 +214,16 @@
             const player = gameState.player;
 
             // Handle input
-            if (gameState.keys[' '] || gameState.keys['Space']) {
+            if (gameState.keys[' '] || gameState.keys['Space'] || gameState.keys['ArrowUp']) {
                 player.thrust = true;
             } else {
                 player.thrust = false;
             }
 
-            if (gameState.keys['a'] || gameState.keys['A']) {
+            if (gameState.keys['a'] || gameState.keys['A'] || gameState.keys['ArrowLeft']) {
                 player.angle -= 0.1;
             }
-            if (gameState.keys['d'] || gameState.keys['D']) {
+            if (gameState.keys['d'] || gameState.keys['D'] || gameState.keys['ArrowRight']) {
                 player.angle += 0.1;
             }
 
@@ -836,10 +836,18 @@
             if (e.key === 'r' || e.key === 'R') {
                 restartGame();
             }
+            // Prevent default behavior for arrow keys to avoid page scrolling
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
+                e.preventDefault();
+            }
         });
 
         document.addEventListener('keyup', (e) => {
             gameState.keys[e.key] = false;
+            // Prevent default behavior for arrow keys
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
+                e.preventDefault();
+            }
         });
 
         canvas.addEventListener('click', () => {

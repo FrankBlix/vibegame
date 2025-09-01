@@ -180,6 +180,29 @@
 
   function initEnemies(){
     state.enemies = [];
+    state.boss = null;
+    // Boss wave hver 5. level
+    if (state.level % 5 === 0) {
+      // Legg til boss
+      state.boss = {
+        alive: true,
+        x: W/2,
+        y: ENEMY_START_Y + 30,
+        size: 90,
+        emoji: '👹',
+        maxHp: 20 + state.level * 6,
+        hp: 20 + state.level * 6,
+        dir: 1,
+        speed: 120 + state.level * 8,
+        shootCooldown: 0
+      };
+      state.enemyDir = 1;
+      state.enemySpeed = 0;
+      state.enemyTimer = 0;
+      state.enemyShootCooldown = 0;
+      return;
+    }
+    // Vanlige fiender
     const offsetX = ENEMY_START_X, offsetY = ENEMY_START_Y;
     for (let r=0; r<ENEMY_ROWS; r++){
       for (let c=0; c<ENEMY_COLS; c++){
@@ -324,45 +347,79 @@
     state.enemyBullets = state.enemyBullets.filter(b=> b.y>-40 && b.y<H+40);
 
     // Enemy movement
-    const alive = state.enemies.filter(e=>e.alive);
-    if (alive.length===0){ nextLevel(); return; }
-    const leftMost = Math.min(...alive.map(e=>e.x));
-    const rightMost = Math.max(...alive.map(e=>e.x));
-    const currentSpeed = state.enemySpeed + ( (ENEMY_ROWS*ENEMY_COLS - alive.length) * 1.2 ) + (state.level-1)*6;
+    // --- Boss wave ---
+    if (state.boss) {
+      const boss = state.boss;
+      if (!boss.alive) { nextLevel(); return; }
+      // Beveg bossen side til side
+      boss.x += boss.dir * boss.speed * dt;
+      if (boss.x - boss.size/2 < ENEMY_MOVE_AREA.left) { boss.x = ENEMY_MOVE_AREA.left + boss.size/2; boss.dir = 1; }
+      if (boss.x + boss.size/2 > ENEMY_MOVE_AREA.right) { boss.x = ENEMY_MOVE_AREA.right - boss.size/2; boss.dir = -1; }
+      // Boss skyter
+      boss.shootCooldown -= dt;
+      if (boss.shootCooldown <= 0) {
+        fireEnemyBullet(boss.x, boss.y + boss.size/2);
+        boss.shootCooldown = 0.7 - Math.min(0.5, state.level*0.03) + Math.random()*0.5;
+      }
+    } else {
+      // --- Vanlige fiender ---
+      const alive = state.enemies.filter(e=>e.alive);
+      if (alive.length===0){ nextLevel(); return; }
+      const leftMost = Math.min(...alive.map(e=>e.x));
+      const rightMost = Math.max(...alive.map(e=>e.x));
+      const currentSpeed = state.enemySpeed + ( (ENEMY_ROWS*ENEMY_COLS - alive.length) * 1.2 ) + (state.level-1)*6;
 
-    const dx = state.enemyDir * currentSpeed * dt;
-    for (const e of alive) e.x += dx;
+      const dx = state.enemyDir * currentSpeed * dt;
+      for (const e of alive) e.x += dx;
 
-    if (rightMost + 22 >= ENEMY_MOVE_AREA.right && state.enemyDir>0){
-      for (const e of alive) e.y += state.enemyStepDown;
-      state.enemyDir = -1;
+      if (rightMost + 22 >= ENEMY_MOVE_AREA.right && state.enemyDir>0){
+        for (const e of alive) e.y += state.enemyStepDown;
+        state.enemyDir = -1;
+      }
+      if (leftMost - 22 <= ENEMY_MOVE_AREA.left && state.enemyDir<0){
+        for (const e of alive) e.y += state.enemyStepDown;
+        state.enemyDir = 1;
+      }
+
+      // Enemy shooting
+      state.enemyShootCooldown -= dt;
+      const fireChance = Math.min(0.25, 0.05 + state.level*0.02 + ( (ENEMY_ROWS*ENEMY_COLS - alive.length) * 0.0015 ) );
+      if (state.enemyShootCooldown<=0 && Math.random()<fireChance){
+        const byCol = new Map();
+        for (const e of alive){ const key = e.col; const prev = byCol.get(key); if (!prev || e.y>prev.y) byCol.set(key, e); }
+        const shooters = [...byCol.values()];
+        const shooter = shooters[Math.floor(Math.random()*shooters.length)];
+        if (shooter) fireEnemyBullet(shooter.x, shooter.y+18);
+        state.enemyShootCooldown = Math.max(0.4, 1.2 - state.level*0.1);
+      }
     }
-    if (leftMost - 22 <= ENEMY_MOVE_AREA.left && state.enemyDir<0){
-      for (const e of alive) e.y += state.enemyStepDown;
-      state.enemyDir = 1;
-    }
 
-    // Enemy shooting
-    state.enemyShootCooldown -= dt;
-    const fireChance = Math.min(0.25, 0.05 + state.level*0.02 + ( (ENEMY_ROWS*ENEMY_COLS - alive.length) * 0.0015 ) );
-    if (state.enemyShootCooldown<=0 && Math.random()<fireChance){
-      const byCol = new Map();
-      for (const e of alive){ const key = e.col; const prev = byCol.get(key); if (!prev || e.y>prev.y) byCol.set(key, e); }
-      const shooters = [...byCol.values()];
-      const shooter = shooters[Math.floor(Math.random()*shooters.length)];
-      if (shooter) fireEnemyBullet(shooter.x, shooter.y+18);
-      state.enemyShootCooldown = Math.max(0.4, 1.2 - state.level*0.1);
-    }
-
-    // Collisions: player bullets vs enemies (and powerup drops)
-    for (const b of state.bullets){
-      if (!b.friendly) continue;
-      for (const e of alive){
-        if (!e.alive) continue;
-        if (rectHit(b.x-2,b.y-5,4,10, e.x-20, e.y-20, 40,40)){
-          e.alive=false; b.y=-9999; state.score += 10 + (ENEMY_ROWS-e.row)*2;
-          const dropChance = Math.min(0.18 + state.level*0.02, 0.35);
-          if (Math.random() < dropChance) spawnPowerup(e.x, e.y);
+    // Collisions: player bullets vs boss
+    if (state.boss && state.boss.alive) {
+      for (const b of state.bullets) {
+        if (!b.friendly) continue;
+        const boss = state.boss;
+        if (rectHit(b.x-2, b.y-5, 4, 10, boss.x-boss.size/2, boss.y-boss.size/2, boss.size, boss.size)) {
+          boss.hp--;
+          b.y = -9999;
+          if (boss.hp <= 0) {
+            boss.alive = false;
+            state.score += 200 + state.level*10;
+            // TODO: spawn debuff her
+          }
+        }
+      }
+    } else {
+      // Collisions: player bullets vs enemies (and powerup drops)
+      for (const b of state.bullets){
+        if (!b.friendly) continue;
+        for (const e of alive){
+          if (!e.alive) continue;
+          if (rectHit(b.x-2,b.y-5,4,10, e.x-20, e.y-20, 40,40)){
+            e.alive=false; b.y=-9999; state.score += 10 + (ENEMY_ROWS-e.row)*2;
+            const dropChance = Math.min(0.18 + state.level*0.02, 0.35);
+            if (Math.random() < dropChance) spawnPowerup(e.x, e.y);
+          }
         }
       }
     }
@@ -371,10 +428,17 @@
     const pb = state.player.getBounds();
     for (const eb of state.enemyBullets){ if (rectHit(eb.x-2, eb.y-5, 4,10, pb.x,pb.y,pb.w,pb.h)){ eb.y=9999; hitPlayer(); return; } }
 
-    // Enemies reach ground or collide with player
-    for (const e of alive){
-      if (e.y+20 >= GROUND_Y-10) { gameOver(); return; }
-      if (rectHit(e.x-18,e.y-18,36,36, pb.x,pb.y,pb.w,pb.h)){ gameOver(); return; }
+    // Boss kolliderer med spiller eller når bakken
+    if (state.boss && state.boss.alive) {
+      const boss = state.boss;
+      if (boss.y + boss.size/2 >= GROUND_Y-10) { gameOver(); return; }
+      if (rectHit(boss.x-boss.size/2, boss.y-boss.size/2, boss.size, boss.size, pb.x,pb.y,pb.w,pb.h)) { gameOver(); return; }
+    } else {
+      // Enemies reach ground or collide with player
+      for (const e of alive){
+        if (e.y+20 >= GROUND_Y-10) { gameOver(); return; }
+        if (rectHit(e.x-18,e.y-18,36,36, pb.x,pb.y,pb.w,pb.h)){ gameOver(); return; }
+      }
     }
 
     // Power-ups fall & collect
@@ -433,6 +497,28 @@
     ctx.fillStyle='rgba(255,146,146,.98)';
     for (const b of state.enemyBullets){ drawRect(b.x-2, b.y-6, 4, 10, .95); }
     ctx.restore();
+
+    // boss
+    if (state.boss && state.boss.alive) {
+      drawEmoji(state.boss.emoji, state.boss.x, state.boss.y, state.boss.size);
+      // Boss HP bar
+      ctx.save();
+      const barW = 220, barH = 18;
+      const hpPct = state.boss.hp / state.boss.maxHp;
+      ctx.globalAlpha = 0.92;
+      ctx.fillStyle = '#222';
+      ctx.fillRect(W/2 - barW/2, 32, barW, barH);
+      ctx.fillStyle = '#ff7b7b';
+      ctx.fillRect(W/2 - barW/2, 32, barW * hpPct, barH);
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(W/2 - barW/2, 32, barW, barH);
+      ctx.font = 'bold 16px sans-serif';
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.fillText('Boss HP', W/2, 46);
+      ctx.restore();
+    }
 
     // enemies
     for (const e of state.enemies){ if (!e.alive) continue; drawEmoji(e.emoji, e.x, e.y, e.size); }

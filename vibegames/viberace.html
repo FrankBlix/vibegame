@@ -68,10 +68,20 @@
   // --- Canvas setup ---
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
-  const W = canvas.width = window.innerWidth;
-  const H = canvas.height = window.innerHeight;
-  canvas.width = W;
-  canvas.height = H;
+  
+  // Set initial canvas size
+  let W = 800;
+  let H = 600;
+  
+  function resizeCanvas() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W;
+    canvas.height = H;
+  }
+  
+  resizeCanvas();
+  window.addEventListener('resize', resizeCanvas);
 
   // --- Game constants ---
   const ROAD_WIDTH = 2000;
@@ -207,6 +217,10 @@
       z: p.world.z - cameraZ
     };
     
+    if (trans.z <= 0) {
+      return { x: 0, y: 0, w: 0, scale: 0 };
+    }
+    
     const scale = cameraDepth / trans.z;
     
     return {
@@ -218,58 +232,68 @@
   }
 
   function findSegment(z) {
-    return track[Math.floor(z / SEGMENT_LENGTH) % track.length];
+    const index = Math.floor(z / SEGMENT_LENGTH);
+    return track[Math.max(0, index) % track.length];
   }
 
   // --- Rendering ---
   function render() {
-    // Sky gradient
-    const gradient = ctx.createLinearGradient(0, 0, 0, H/2);
-    gradient.addColorStop(0, '#87CEEB');
-    gradient.addColorStop(1, '#FFD700');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, W, H/2);
-    
-    // Ground
-    ctx.fillStyle = '#228B22';
-    ctx.fillRect(0, H/2, W, H/2);
-    
-    const baseSegment = findSegment(state.position);
-    let cameraY = CAMERA_HEIGHT + baseSegment.p1.world.y;
-    
-    let x = 0;
-    let dx = 0;
-    
-    for (let n = 0; n < DRAW_DISTANCE; n++) {
-      const segment = track[(baseSegment.index + n) % track.length];
+    try {
+      // Clear canvas
+      ctx.clearRect(0, 0, W, H);
       
-      segment.p1.camera.x = segment.p1.world.x - x;
-      segment.p1.camera.y = segment.p1.world.y - cameraY;
-      segment.p1.camera.z = segment.p1.world.z - state.position;
+      // Sky gradient
+      const gradient = ctx.createLinearGradient(0, 0, 0, H/2);
+      gradient.addColorStop(0, '#87CEEB');
+      gradient.addColorStop(1, '#FFD700');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, W, H/2);
       
-      segment.p2.camera.x = segment.p2.world.x - x - dx;
-      segment.p2.camera.y = segment.p2.world.y - cameraY;
-      segment.p2.camera.z = segment.p2.world.z - state.position;
+      // Ground
+      ctx.fillStyle = '#228B22';
+      ctx.fillRect(0, H/2, W, H/2);
       
-      x += dx;
-      dx += segment.curve;
+      const baseSegment = findSegment(state.position);
+      if (!baseSegment) return;
       
-      if (segment.p1.camera.z <= 0 || segment.p2.camera.z <= 0) continue;
+      let cameraY = CAMERA_HEIGHT + baseSegment.p1.world.y;
       
-      segment.p1.screen = project(segment.p1, state.cameraX, cameraY, state.position, FOV);
-      segment.p2.screen = project(segment.p2, state.cameraX, cameraY, state.position, FOV);
+      let x = 0;
+      let dx = 0;
       
-      if (segment.p1.screen.scale <= 0 || segment.p2.screen.scale <= 0) continue;
+      for (let n = 0; n < DRAW_DISTANCE; n++) {
+        const segment = track[(baseSegment.index + n) % track.length];
+        
+        segment.p1.camera.x = segment.p1.world.x - x;
+        segment.p1.camera.y = segment.p1.world.y - cameraY;
+        segment.p1.camera.z = segment.p1.world.z - state.position;
+        
+        segment.p2.camera.x = segment.p2.world.x - x - dx;
+        segment.p2.camera.y = segment.p2.world.y - cameraY;
+        segment.p2.camera.z = segment.p2.world.z - state.position;
+        
+        x += dx;
+        dx += segment.curve;
+        
+        if (segment.p1.camera.z <= 0 || segment.p2.camera.z <= 0) continue;
+        
+        segment.p1.screen = project(segment.p1, state.cameraX, cameraY, state.position, FOV);
+        segment.p2.screen = project(segment.p2, state.cameraX, cameraY, state.position, FOV);
+        
+        if (segment.p1.screen.scale <= 0 || segment.p2.screen.scale <= 0) continue;
+        
+        drawSegment(segment);
+      }
       
-      drawSegment(segment);
-    }
-    
-    // Draw player car
-    drawPlayerCar();
-    
-    // Draw other cars
-    for (const car of state.cars) {
-      drawCar(car);
+      // Draw player car
+      drawPlayerCar();
+      
+      // Draw other cars
+      for (const car of state.cars) {
+        drawCar(car);
+      }
+    } catch (e) {
+      console.error('Render error:', e);
     }
   }
 
@@ -507,9 +531,11 @@
   }
 
   function startRace() { 
+    console.log('Starting race...');
     state.started = true; 
     hideOverlay(); 
     spawnCars();
+    console.log('Cars spawned:', state.cars.length);
     resume(); 
   }
   
@@ -524,6 +550,7 @@
   }
   
   function resume() { 
+    console.log('Resuming game...');
     state.paused = false; 
     state.lastTime = performance.now(); 
     requestAnimationFrame(loop); 
@@ -556,21 +583,25 @@
     const dt = Math.min(0.033, (t - state.lastTime) / 1000 || 0);
     state.lastTime = t;
     
-    update(dt);
-    render();
+    try {
+      update(dt);
+      render();
+    } catch (e) {
+      console.error('Game loop error:', e);
+    }
     
     requestAnimationFrame(loop);
   }
 
   // --- Initialize ---
-  window.addEventListener('resize', () => {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-  });
-
-  restart();
-  state.paused = true;
-  showOverlay('start');
+  function init() {
+    restart();
+    state.paused = true;
+    showOverlay('start');
+  }
+  
+  // Start when page loads
+  init();
 })();
 </script>
 </body>
